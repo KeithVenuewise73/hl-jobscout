@@ -63,6 +63,35 @@ Deno.test("a site with no ATS anywhere is still a well-formed row", async () => 
   assertEquals(r.careers_url, "https://smallco.com");
 });
 
+Deno.test("evidence records what happened at each path, not just 'not found'", async () => {
+  // A bot-blocked site and a site with no ATS are completely different answers.
+  const get: FetchPage = (url) => {
+    if (url.endsWith("/careers")) return Promise.reject(new Error("http_403"));
+    if (url.endsWith("/jobs")) return Promise.reject(new Error("http_404"));
+    return page("<html>nothing</html>", url);
+  };
+  const r = await findCareersPage("acme.com", get);
+  assertEquals(r.ats, "unknown");
+  // The reason for each URL survives into the record.
+  assertEquals(r.evidence.includes("http_403"), true);
+  assertEquals(r.evidence.includes("http_404"), true);
+});
+
+Deno.test("a slow site cannot eat the whole run", async () => {
+  let t = 0;
+  const now = () => (t += 30_000);   // every check jumps 30s
+  let calls = 0;
+  const get: FetchPage = (url) => {
+    calls++;
+    return page("<html>nothing</html>", url);
+  };
+  const r = await findCareersPage("slow.com", get, { deadlineMs: 45_000, now });
+  assertEquals(r.ats, "unknown");
+  assertEquals(r.evidence.includes("deadline reached"), true);
+  // Homepage plus at most one hint, not all of them.
+  assertEquals(calls <= 2, true);
+});
+
 Deno.test("a malformed website field does not throw", async () => {
   const get: FetchPage = () => Promise.reject(new Error("never called"));
   const r = await findCareersPage("http://[not a url", get);

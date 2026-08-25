@@ -12,17 +12,26 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { findCareersPage, type FetchPage } from "../_shared/discover.ts";
 import { validateRedirect, validateUrl } from "../_shared/url.ts";
 
-const BUDGET_MS = Number(Deno.env.get("JOBSCOUT_DISCOVER_BUDGET_MS") ?? 120_000);
+// Sized against what the edge runtime will actually tolerate, not against what
+// would be convenient. The first real run asked for 60 companies x up to 9 page
+// fetches, buffered whole pages (200-280KB each), and was killed with
+// WORKER_RESOURCE_LIMIT after four. Small batches, hard caps, run more often.
+const BUDGET_MS = Number(Deno.env.get("JOBSCOUT_DISCOVER_BUDGET_MS") ?? 60_000);
+const BATCH = Number(Deno.env.get("JOBSCOUT_DISCOVER_BATCH") ?? 6);
+const PER_COMPANY_MS = Number(Deno.env.get("JOBSCOUT_DISCOVER_COMPANY_MS") ?? 20_000);
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/124 Safari/537.36";
-const MAX_HTML = 2 * 1024 * 1024;
+// An ATS link is a short string in the markup. 400KB of any careers page is far
+// more than enough to find one, and buffering more is what killed the worker.
+const MAX_HTML = 400 * 1024;
+const PAGE_TIMEOUT_MS = 10_000;
 
 // Careers pages are arbitrary third-party URLs, so every hop is SSRF-checked.
 const fetchPage: FetchPage = async (url) => {
   let current = validateUrl(url).toString();
   for (let hop = 0; hop <= 5; hop++) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15_000);
+    const timer = setTimeout(() => ctrl.abort(), PAGE_TIMEOUT_MS);
     let res: Response;
     try {
       res = await fetch(current, {
@@ -44,11 +53,32 @@ const fetchPage: FetchPage = async (url) => {
       res.body?.cancel();
       throw new Error(`http_${res.status}`);
     }
-    const html = (await res.text()).slice(0, MAX_HTML);
+    // Read only up to the cap, then hang up. res.text() would pull the whole
+    // body into memory first and slicing afterwards is too late.
+    const html = await readCapped(res, MAX_HTML);
     return { html, finalUrl: current };
   }
   throw new Error("too_many_redirects");
 };
+
+async function readCapped(res: Response, max: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const dec = new TextDecoder();
+  let out = "";
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    out += dec.decode(value, { stream: true });
+    if (total >= max) {
+      await reader.cancel();
+      break;
+    }
+  }
+  return out;
+}
 
 Deno.serve(async () => {
   const started = Date.now();
@@ -66,7 +96,7 @@ Deno.serve(async () => {
     .or("ats.is.null,ats.eq.unknown")
     .order("discover_attempted_at", { ascending: true, nullsFirst: true })
     .order("priority", { ascending: true })
-    .limit(60);
+    .limit(BATCH);
   if (error) return json({ ok: false, error: error.message }, 500);
 
   const detail: unknown[] = [];
@@ -77,7 +107,9 @@ Deno.serve(async () => {
       deferred = (pending?.length ?? 0) - detail.length;
       break;
     }
-    const det = await findCareersPage(c.website as string, fetchPage);
+    const det = await findCareersPage(c.website as string, fetchPage, {
+      deadlineMs: PER_COMPANY_MS,
+    });
     const { error: upErr } = await admin.from("companies").update({
       ats: det.ats,
       board_token: det.board_token,
@@ -95,10 +127,19 @@ Deno.serve(async () => {
     });
   }
 
+  const { count: stillPending } = await admin
+    .from("companies")
+    .select("id", { count: "exact", head: true })
+    .eq("active", true)
+    .not("website", "is", null)
+    .or("ats.is.null,ats.eq.unknown");
+
   const report = {
     elapsed_ms: Date.now() - started,
     attempted: detail.length,
-    deferred_to_next_run: deferred,
+    deferred_this_batch: deferred,
+    // Unresolved across the WHOLE list, so a caller knows to run again.
+    still_unresolved: stillPending ?? null,
     ingestible_today: resolved,
     detail,
   };

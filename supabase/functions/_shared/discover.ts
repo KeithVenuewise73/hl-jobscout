@@ -42,9 +42,11 @@ export const SIGNATURES: [string, RegExp][] = [
   ["workable", /apply\.workable\.com\/([a-zA-Z0-9_-]+)/],
 ];
 
+// Ordered by observed yield. Every extra hint is another full page fetch held
+// in memory, and the edge runtime kills the worker before politeness does —
+// the first real run died with WORKER_RESOURCE_LIMIT after four companies.
 export const CAREER_HINTS = [
-  "/careers", "/career", "/jobs", "/join-us", "/employment",
-  "/work-with-us", "/opportunities", "/about/careers",
+  "/careers", "/careers/", "/career", "/jobs", "/employment", "/join-us",
 ];
 
 /** The shape every caller can rely on. */
@@ -76,14 +78,33 @@ export async function probe(url: string, get: FetchPage): Promise<Detection> {
   try {
     page = await get(url);
   } catch (e) {
-    return unresolved(`${(e as Error).name} fetching ${url}`);
+    return unresolved((e as Error).message || (e as Error).name);
   }
-  return fingerprint(page.html, page.finalUrl)
-    ?? unresolved(`no ATS signature at ${page.finalUrl}`);
+  return fingerprint(page.html, page.finalUrl) ?? unresolved("no ATS link");
 }
 
-/** Given a company homepage, try the homepage then the usual careers paths. */
-export async function findCareersPage(root: string, get: FetchPage): Promise<Detection> {
+export interface FindOptions {
+  /** Wall-clock ceiling for ONE company, so a slow site cannot eat the run. */
+  deadlineMs?: number;
+  now?: () => number;
+}
+
+/**
+ * Given a company homepage, try the homepage then the usual careers paths.
+ *
+ * On failure the evidence records what actually happened at each URL — "404 at
+ * /careers, 403 at /jobs" is actionable, "no careers page found" is not, and
+ * telling a bot-blocked site apart from one with no ATS is the whole question
+ * this function exists to answer.
+ */
+export async function findCareersPage(
+  root: string,
+  get: FetchPage,
+  opts: FindOptions = {},
+): Promise<Detection> {
+  const now = opts.now ?? (() => Date.now());
+  const deadline = now() + (opts.deadlineMs ?? 45_000);
+
   let base: string;
   try {
     const u = new URL(root.startsWith("http") ? root : `https://${root}`);
@@ -92,13 +113,20 @@ export async function findCareersPage(root: string, get: FetchPage): Promise<Det
     return unresolved(`malformed website: ${root}`);
   }
 
+  const tried: string[] = [];
+
   const home = await probe(base, get);
   if (home.ats !== "unknown") return { ...home, careers_url: base };
+  tried.push(`/: ${home.evidence}`);
 
   for (const hint of CAREER_HINTS) {
-    const u = base + hint;
-    const res = await probe(u, get);
-    if (res.ats !== "unknown") return { ...res, careers_url: u };
+    if (now() >= deadline) {
+      tried.push("deadline reached — remaining paths not tried");
+      break;
+    }
+    const res = await probe(base + hint, get);
+    if (res.ats !== "unknown") return { ...res, careers_url: base + hint };
+    tried.push(`${hint}: ${res.evidence}`);
   }
-  return unresolved("no careers page found", { careers_url: base });
+  return unresolved(tried.join(" | ").slice(0, 500), { careers_url: base });
 }

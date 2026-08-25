@@ -6,13 +6,32 @@
 // title *ending* in "Associate" — so every warehouse-associate posting reached
 // the model despite a filter existing to stop exactly that.
 
+// Matched with a left word boundary only, so "operation" also catches
+// "Operational Excellence". Tuned against Keith's actual career: the titles he
+// has held (Market Manager at CRST, Operations Manager - Last Mile at RXO,
+// Distribution Manager at Arctic Glacier) and the ones he should be shown.
 export const TITLE_INCLUDE = [
   "operations", "operation", "plant", "production", "warehouse", "distribution",
   "logistics", "supply chain", "transportation", "fleet", "dispatch",
-  "general manager", "site manager", "branch manager", "facility", "facilities",
-  "field service", "service manager", "terminal", "director", "vp",
+  "general manager", "site manager", "branch manager", "market manager",
+  "facility", "facilities", "field service", "service manager", "terminal",
+  "director", "president", "chief operating",
   "continuous improvement", "process improvement", "3pl", "last mile",
   "final mile", "delivery", "shipping", "receiving", "inventory",
+  "route", "carrier", "depot",
+];
+
+// Short/ambiguous terms that need boundaries on BOTH sides — left-bounded
+// "hub" matches "Hubbard", "vp" matches "VPN".
+export const TITLE_INCLUDE_EXACT = ["vp", "coo", "gm", "hub", "dsd", "dc"];
+
+// These beat the exclusion list. "Driver Manager" is a transportation
+// management job, not a driving job, and the rule that kills "Delivery Driver"
+// would otherwise kill it too. Same for "Associate Director", which is a senior
+// title the "associate" rule was never aimed at.
+export const TITLE_RESCUE = [
+  "driver manager", "driver supervisor", "driver lead",
+  "associate director", "associate vice president",
 ];
 
 export const TITLE_EXCLUDE = [
@@ -34,16 +53,16 @@ export const LOCATION_OK = [
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// Exclusions are bounded on both sides ("associate" must not match
-// "Associated"). Inclusions are bounded on the left only, so "operation"
-// still catches "Operational Excellence".
 const EXCLUDE_RE = new RegExp(`\\b(?:${TITLE_EXCLUDE.map(esc).join("|")})\\b`, "i");
 const INCLUDE_RE = new RegExp(`\\b(?:${TITLE_INCLUDE.map(esc).join("|")})`, "i");
+const INCLUDE_EXACT_RE = new RegExp(`\\b(?:${TITLE_INCLUDE_EXACT.map(esc).join("|")})\\b`, "i");
+const RESCUE_RE = new RegExp(`\\b(?:${TITLE_RESCUE.map(esc).join("|")})\\b`, "i");
 
 export function titleOk(t: string | null | undefined): boolean {
   const s = t ?? "";
+  if (RESCUE_RE.test(s)) return true;          // rescue beats exclude
   if (EXCLUDE_RE.test(s)) return false;
-  return INCLUDE_RE.test(s);
+  return INCLUDE_RE.test(s) || INCLUDE_EXACT_RE.test(s);
 }
 
 export function locationOk(loc: string | null | undefined): boolean {
