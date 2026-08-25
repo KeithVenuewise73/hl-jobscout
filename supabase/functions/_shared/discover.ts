@@ -8,7 +8,14 @@
 // shape — ats/board_token/supported always set — because the original could
 // return a record with no `ats` key on a failed fetch and crash the caller.
 
-import { SUPPORTED } from "./adapters.ts";
+// Deliberately NOT imported from adapters.ts. Discovery only needs to know
+// WHICH systems are ingestible, not how to ingest them, and keeping the import
+// out means the deployed discover function does not carry all five adapters.
+// tests/discover.test.ts asserts this list still equals Object.keys(ADAPTERS),
+// so adding an adapter without updating it fails the suite.
+export const INGESTIBLE = new Set([
+  "greenhouse", "lever", "ashby", "smartrecruiters", "workday",
+]);
 
 export interface Detection {
   ats: string;
@@ -93,7 +100,7 @@ export function fingerprint(html: string, finalUrl: string): Detection | null {
     const rec: Detection = {
       ats,
       board_token: m[1],
-      supported: SUPPORTED.has(ats),
+      supported: INGESTIBLE.has(ats),
       evidence: m[0].slice(0, 120),
     };
     if (ats === "workday") {

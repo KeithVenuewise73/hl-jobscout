@@ -4,5 +4,10 @@
     "check": "deno check supabase/functions/_shared/*.ts supabase/functions/tests/*.ts",
     "lint": "deno lint supabase/functions/"
   },
+  "lint": {
+    "rules": {
+      "exclude": ["no-import-prefix"]
+    }
+  },
   "fmt": { "lineWidth": 90 }
 }

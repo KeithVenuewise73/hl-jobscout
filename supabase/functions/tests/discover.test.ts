@@ -1,10 +1,17 @@
 import { assertEquals } from "./assert.ts";
 import {
-  findCareersPage, fingerprint, probe, type FetchPage,
+  findCareersPage, fingerprint, INGESTIBLE, probe, type FetchPage,
 } from "../_shared/discover.ts";
+import { ADAPTERS } from "../_shared/adapters.ts";
 
 const page = (html: string, finalUrl = "https://acme.com/careers") =>
   Promise.resolve({ html, finalUrl });
+
+Deno.test("INGESTIBLE stays in step with the adapters that actually exist", () => {
+  // discover.ts keeps its own copy so the deployed function need not carry the
+  // adapters. This is the tripwire that stops the two from drifting apart.
+  assertEquals([...INGESTIBLE].sort(), Object.keys(ADAPTERS).sort());
+});
 
 Deno.test("fingerprints the boards we can actually ingest", () => {
   const gh = fingerprint('<a href="https://boards.greenhouse.io/acmecorp">Jobs</a>', "");

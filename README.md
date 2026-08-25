@@ -44,10 +44,16 @@ Cores are pure and injected; the edge functions are thin enough to read.
 deno test supabase/functions/tests/
 ```
 
-43 tests, no network, about a second. They cover the adapter field mapping
+51 tests, no network, about half a second. They cover the adapter field mapping
 against recorded ATS payloads, the stage-1 filters, the SSRF guard, and — the
 ones worth having — the ingest failure paths, because the close-stale step is
 the one that can destroy data if it fires on bad input.
+
+`no-import-prefix` is excluded in `deno.json`. Supabase Edge Functions are
+required to import via inline `jsr:` / `npm:` specifiers — that is the
+deployment contract, not a shortcut — so leaving the rule on meant every lint
+run reported four errors that must not be fixed, which is how a lint stops
+being read.
 
 **What the tests do not cover:** whether the live boards still return the JSON
 these adapters expect. That needs a real crawl. A board that changes its shape
