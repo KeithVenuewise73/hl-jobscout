@@ -1,6 +1,6 @@
 import { assertEquals, assertStringIncludes, assertTrue } from "./assert.ts";
 import {
-  findCareersPage, fingerprint, INGESTIBLE, probe, type FetchPage,
+  findCareersPage, fingerprint, INGESTIBLE, probe, shortError, type FetchPage,
 } from "../_shared/discover.ts";
 import { ADAPTERS } from "../_shared/adapters.ts";
 
@@ -187,5 +187,31 @@ Deno.test("evidence still names what was tried, subdomains included", () => {
     assertEquals(d.ats, "unknown");
     assertStringIncludes(d.evidence, "jobs.acme.com");
     assertStringIncludes(d.evidence, "ENOTFOUND");
+  })();
+});
+
+Deno.test("a verbose fetch error cannot crowd out the rest of the evidence", () => {
+  // Deno reports a missing host as ~190 characters. Two of those overflowed the
+  // whole 500-char evidence field on a real run, so nothing could be seen about
+  // any later candidate — and "what happened at each URL" is the only question
+  // this field exists to answer.
+  const dns =
+    "error sending request for url (https://jobs.acme.com/): client error " +
+    "(Connect): dns error: failed to lookup address information: Name or " +
+    "service not known: failed to lookup address information: Name or " +
+    "service not known";
+  assertEquals(shortError(new Error(dns)), "no such host");
+  assertEquals(shortError(new Error("operation timed out")), "timeout");
+
+  return (async () => {
+    const get: FetchPage = (url) =>
+      url.includes("jobs.") || url.includes("careers.")
+        ? Promise.reject(new Error(dns))
+        : Promise.resolve({ html: "<p>none</p>", finalUrl: url });
+    const d = await findCareersPage("https://acme.com", get);
+    // Every candidate is still visible, including the last path tried.
+    assertStringIncludes(d.evidence, "jobs.acme.com: no such host");
+    assertStringIncludes(d.evidence, "/en-us/jobs");
+    assertTrue(d.evidence.length < 500, `evidence was ${d.evidence.length} chars`);
   })();
 });

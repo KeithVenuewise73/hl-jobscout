@@ -131,12 +131,31 @@ export function fingerprint(html: string, finalUrl: string): Detection | null {
   return null;
 }
 
+/**
+ * Shorten a fetch failure to something an evidence line can afford.
+ *
+ * Deno reports a missing host as 190 characters of "error sending request for
+ * url (...): client error (Connect): dns error: failed to lookup address
+ * information: Name or service not known: failed to lookup address
+ * information: Name or service not known". Two of those overflowed the whole
+ * 500-character evidence field, so a real run could not show what happened on
+ * any later candidate — the field exists to answer exactly that question.
+ */
+export function shortError(e: unknown): string {
+  const raw = ((e as Error)?.message || (e as Error)?.name || String(e));
+  if (/dns error|failed to lookup address/i.test(raw)) return "no such host";
+  if (/timed?[ _]?out|aborted/i.test(raw)) return "timeout";
+  if (/certificate|tls|ssl/i.test(raw)) return "tls error";
+  if (/connection refused|connect/i.test(raw)) return "connect failed";
+  return raw.slice(0, 60);
+}
+
 export async function probe(url: string, get: FetchPage): Promise<Detection> {
   let page: { html: string; finalUrl: string };
   try {
     page = await get(url);
   } catch (e) {
-    return unresolved((e as Error).message || (e as Error).name);
+    return unresolved(shortError(e));
   }
   return fingerprint(page.html, page.finalUrl) ?? unresolved("no ATS link");
 }
