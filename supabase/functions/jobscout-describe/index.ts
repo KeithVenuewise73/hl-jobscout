@@ -9,7 +9,14 @@
 // still a manual step; a description_url column is the next move and needs a
 // migration, which needs approval.
 //
-// POST {"jobs":[{"id":1,"url":"https://employer.example/jobs/123"}]}
+// POST {"jobs":[{"id":1,"url":"https://employer.example/jobs/123"}],"strict":true}
+//
+// strict (default TRUE) writes only a schema.org JobPosting. The text fallback
+// is still reported so you can see what a page yielded, but it is not saved:
+// point this at a SEARCH RESULTS page by mistake and the fallback happily
+// returns nav links and a cookie banner, which the scorer would then treat as
+// a real description — dropping its no-description cap and scoring the job on
+// nothing. A wrong description is worse than none.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { blockedSource, extract } from "../_shared/describe.ts";
@@ -86,7 +93,7 @@ Deno.serve(async (req) => {
     { db: { schema: "jobscout" } },
   );
 
-  let body: { jobs?: { id: number; url: string }[] };
+  let body: { jobs?: { id: number; url: string }[]; strict?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -94,6 +101,7 @@ Deno.serve(async (req) => {
   }
   const wanted = (body.jobs ?? []).slice(0, MAX_JOBS);
   if (!wanted.length) return json({ ok: false, error: "no jobs given" }, 400);
+  const strict = body.strict !== false;
 
   const detail: unknown[] = [];
   let updated = 0;
@@ -109,6 +117,14 @@ Deno.serve(async (req) => {
       const got = extract(html);
       if (!got.description) {
         detail.push({ id: t.id, ok: false, error: "no description found", via: got.via });
+        continue;
+      }
+      if (strict && got.via !== "json-ld") {
+        detail.push({
+          id: t.id, ok: false, via: got.via,
+          error: "no schema.org JobPosting on this page — not saved",
+          preview: got.description.slice(0, 200),
+        });
         continue;
       }
       // comp_text only when we actually found one — never overwrite a real
@@ -130,7 +146,9 @@ Deno.serve(async (req) => {
     }
   }
 
-  const report = { elapsed_ms: Date.now() - started, asked: wanted.length, updated, detail };
+  const report = {
+    elapsed_ms: Date.now() - started, asked: wanted.length, strict, updated, detail,
+  };
   await admin.from("runs").insert({
     kind: "describe", ok: updated === wanted.length, report,
   });
