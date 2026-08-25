@@ -18,6 +18,7 @@ export const TITLE_INCLUDE = [
   "operations", "operation", "plant", "production", "warehouse", "distribution",
   "logistics", "supply chain", "transportation", "fleet", "dispatch",
   "general manager", "site manager", "branch manager", "market manager",
+  "area manager", "regional manager", "district manager",
   "facility", "facilities", "field service", "service manager", "terminal",
   "director", "president", "chief operating",
   "continuous improvement", "process improvement", "3pl", "last mile",

@@ -87,6 +87,16 @@ Deno.test("the far-state shortcut stands down when the radius outgrows it", () =
   assertEquals(withinRadius("Columbus, OH", 250).ok, true);
 });
 
+Deno.test("Canadian provinces are excluded — except Ontario", () => {
+  // A LinkedIn alert surfaced a Montreal role that passed as "unresolved",
+  // because no province appeared in any list. Ontario stays in: Fort Erie is
+  // across the bridge, closer than half the towns in the gazetteer.
+  for (const l of ["Montreal, QC", "Vancouver, BC", "Calgary, AB"]) {
+    assertEquals(withinRadius(l).ok, false, l);
+  }
+  assertEquals(withinRadius("Fort Erie, ON").ok, true);
+});
+
 Deno.test("an unknown place still reaches the model", () => {
   // Deliberate: an unrecognized location is not a reason to spend nothing. It
   // is also why far places must be IN the gazetteer rather than merely absent.

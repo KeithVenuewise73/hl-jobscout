@@ -71,6 +71,12 @@ const FAR_STATE =
   /(?:^|[,(\s])(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NC|ND|OH|OK|OR|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)(?:[,).\s]|$)/;
 const FAR_STATE_MAX_RADIUS = 100;
 
+// Canadian provinces, minus Ontario. Ontario is genuinely commutable — Fort
+// Erie is across the bridge — but a LinkedIn alert surfaced a Montreal role
+// that sailed through as "unresolved" because QC was in no list at all.
+const FAR_PROVINCE =
+  /(?:^|[,(\s])(QC|BC|AB|MB|SK|NS|NB|NL|PE|YT|NT|NU|QUEBEC|MONTREAL|VANCOUVER|CALGARY|EDMONTON|WINNIPEG|HALIFAX|OTTAWA)(?:[,).\s]|$)/;
+
 const ZIP = /\b(\d{5})(?:-\d{4})?\b/;
 // "Buffalo, NY" / "Buffalo, New York" / "Amherst NY 14221"
 const CITY_STATE = /([A-Za-z][A-Za-z.'\- ]{1,40}?)[,\s]+(?:([A-Z]{2})|(New York|Pennsylvania|Ohio))\b/;
@@ -147,9 +153,10 @@ export function withinRadius(
     }
   }
 
-  // 4. A named far state settles it even without a city we recognize.
+  // 4. A named far state or province settles it without a city we recognize.
   if (radiusMiles <= FAR_STATE_MAX_RADIUS) {
-    const fm = FAR_STATE.exec(raw.toUpperCase());
+    const up = raw.toUpperCase();
+    const fm = FAR_STATE.exec(up) ?? FAR_PROVINCE.exec(up);
     if (fm) return { ok: false, reason: "far_state", matched: fm[1] };
   }
 

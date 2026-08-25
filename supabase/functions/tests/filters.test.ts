@@ -72,6 +72,15 @@ Deno.test("short include terms are bounded on both sides", () => {
   assertEquals(titleOk("VPN Support Engineer"), false);
 });
 
+Deno.test("area/regional/district manager survive — real alert-email titles", () => {
+  // "Area Manager at B&T Building Services, Buffalo" came through a LinkedIn
+  // alert and was dropped: a legitimate multi-site ops title that was in
+  // neither list.
+  for (const t of ["Area Manager", "Regional Manager", "District Manager"]) {
+    assertEquals(titleOk(t), true, t);
+  }
+});
+
 Deno.test("locationOk — now a real 50-mile radius, not a substring list", () => {
   for (const l of ["Buffalo, NY", "Remote", "Amherst", "Western New York"]) {
     assertEquals(locationOk(l), true, l);
