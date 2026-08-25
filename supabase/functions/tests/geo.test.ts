@@ -122,3 +122,33 @@ Deno.test("the generated gazetteer is present and plausible", () => {
   assertTrue(buf !== undefined, "14202 present");
   assertTrue(distanceMiles(ORIGIN, { lat: buf[0], lon: buf[1] }) < 5);
 });
+
+Deno.test("a spelled-out far state is as definite as its two-letter code", () => {
+  // LinkedIn writes state-level postings as "Virginia, United States". The code
+  // list only knew "VA", so every one of these rode the unresolved fallback into
+  // a paid model call — and a Capstone Director of Operations in Virginia did
+  // exactly that on the first real alert run.
+  for (const l of ["Virginia, United States", "Texas, United States",
+                   "California, United States", "West Virginia, United States"]) {
+    const r = withinRadius(l);
+    assertEquals(r.ok, false, `${l} -> ${r.reason}`);
+    assertEquals(r.reason, "far_state", l);
+  }
+});
+
+Deno.test("the city table still wins over a spelled-out state name", () => {
+  // "Indiana, PA" is a real town named after a far state. The city lookup runs
+  // first, so it resolves by distance rather than matching "indiana" — which is
+  // what makes the spelled-out list safe to consult at all.
+  const ind = withinRadius("Indiana, PA");
+  assertEquals(ind.reason, "city");
+  assertTrue((ind.miles ?? 0) > 150);
+  assertEquals(withinRadius("New York, New York").reason, "city");
+  // And a near town whose state is spelled out is still admitted.
+  const r = withinRadius("Amherst, New York");
+  assertEquals(r.ok, true, `${r.reason} ${r.miles}`);
+  // Columbus OH is beyond the gazetteer's build radius, so it is not in the
+  // city table at all — the spelled-out rule is what excludes it, and the
+  // answer is the same either way.
+  assertEquals(withinRadius("Columbus, Ohio").ok, false);
+});

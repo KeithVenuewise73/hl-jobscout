@@ -28,7 +28,7 @@ export interface AlertPosting {
 const BADGE = new RegExp(
   "^(easily apply|responsive employer|urgently hiring|hiring multiple candidates" +
     "|apply with resume & profile|be an early applicant|actively reviewing" +
-    "|this company is actively hiring|fast growing|promoted|viewed" +
+    "|this company is actively hiring|fast growing|promoted|viewed|top applicant" +
     "|\\d+ (school )?alum(ni)?|\\d+ connections?)$",
   "i",
 );
@@ -147,18 +147,40 @@ export function parseLinkedInAlert(body: string): AlertPosting[] {
   const out: AlertPosting[] = [];
   const head = body.split(/\nSee all jobs on LinkedIn:/)[0];
 
-  for (const raw of head.split(/\n-{10,}\n/)) {
+  const blocks = head.split(/\n-{10,}\n/);
+  for (let b = 0; b < blocks.length; b++) {
+    const raw = blocks[b];
     const m = raw.match(/View job:\s*(https:\/\/www\.linkedin\.com\/comm\/jobs\/view\/(\d+)\/\S*)/);
     if (!m) continue;
 
-    const lines = raw.split("\n").map(clean).filter(Boolean)
-      .filter((l) => !/^View job:/.test(l))
-      // The first block carries the alert header; drop it.
-      .filter((l) => !/^Your job alert for /i.test(l) && !/^\d+ new jobs match/i.test(l));
+    let lines = raw.split("\n").map(clean).filter(Boolean)
+      .filter((l) => !/^View job:/.test(l));
+
+    // Only the FIRST block carries the alert header, so header stripping is
+    // confined to it — a later posting can never lose its title to a phrase
+    // that happens to look like preamble.
+    //
+    // Within that block, drop everything up to and including the last header
+    // line. Matching the count was the bug: the Buffalo digests lead "10 new
+    // jobs match your preferences.", but a national one leads "New jobs match
+    // your preferences." with no count. The count-anchored filter missed it, so
+    // the header became the title, the title became the company, and the
+    // digest's first real posting vanished with no trace in any report.
+    if (b === 0) {
+      const isHeader = (l: string) =>
+        /^Your job alert for /i.test(l) || /\bmatch(es)? your preferences\b/i.test(l);
+      let last = -1;
+      for (let i = 0; i < lines.length; i++) if (isHeader(lines[i])) last = i;
+      if (last >= 0) lines = lines.slice(last + 1);
+    }
 
     const fields = lines.filter((l) => !BADGE.test(l) && !RECENCY.test(l));
     if (fields.length < 2) continue;
 
+    // Read FORWARD. LinkedIn prints badges BELOW the location, so an
+    // unrecognized badge is harmless here — it lands after the three fields we
+    // want. Reading backwards to dodge the header would have broken on exactly
+    // that, which is why the header is handled above instead.
     const [title, company, location] = fields;
     out.push({
       source: "linkedin",

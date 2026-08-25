@@ -74,6 +74,25 @@ const FAR_STATE_MAX_RADIUS = 100;
 // Canadian provinces, minus Ontario. Ontario is genuinely commutable — Fort
 // Erie is across the bridge — but a LinkedIn alert surfaced a Montreal role
 // that sailed through as "unresolved" because QC was in no list at all.
+// LinkedIn writes state-level postings as "Virginia, United States", and the
+// code list above only knows "VA". Every such posting therefore rode the
+// unresolved fallback into a paid model call — and LinkedIn uses this form a
+// lot. Spelled-out names, minus New York and Pennsylvania.
+//
+// This is only reached after ZIP, region and city lookup have all failed, which
+// is what makes it safe: "Indiana, PA" and "Columbus, Ohio" are resolved by the
+// city table before they can be mistaken for a bare state.
+const FAR_STATE_NAME = new RegExp(
+  "\\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware" +
+    "|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky" +
+    "|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi" +
+    "|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico" +
+    "|north carolina|north dakota|ohio|oklahoma|oregon|rhode island" +
+    "|south carolina|south dakota|tennessee|texas|utah|vermont|virginia" +
+    "|washington|west virginia|wisconsin|wyoming|district of columbia)\\b",
+  "i",
+);
+
 const FAR_PROVINCE =
   /(?:^|[,(\s])(QC|BC|AB|MB|SK|NS|NB|NL|PE|YT|NT|NU|QUEBEC|MONTREAL|VANCOUVER|CALGARY|EDMONTON|WINNIPEG|HALIFAX|OTTAWA)(?:[,).\s]|$)/;
 
@@ -158,6 +177,8 @@ export function withinRadius(
     const up = raw.toUpperCase();
     const fm = FAR_STATE.exec(up) ?? FAR_PROVINCE.exec(up);
     if (fm) return { ok: false, reason: "far_state", matched: fm[1] };
+    const nm = FAR_STATE_NAME.exec(raw);
+    if (nm) return { ok: false, reason: "far_state", matched: nm[1] };
   }
 
   return { ok: true, reason: "unresolved" };

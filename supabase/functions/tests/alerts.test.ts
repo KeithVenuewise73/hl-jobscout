@@ -107,3 +107,61 @@ Deno.test("stableId is deterministic and case-insensitive", () => {
   assertEquals(stableId("in", "Ops Manager", "Acme"), stableId("in", "ops manager", "acme"));
   assertTrue(stableId("in", "A", "B") !== stableId("in", "A", "C"));
 });
+
+Deno.test("a digest header without a job count does not eat the first posting", () => {
+  // Real regression. The Buffalo digests lead "10 new jobs match your
+  // preferences."; a national one leads "New jobs match your preferences."
+  // with no count. The count-anchored filter missed it, so the header line
+  // became the title, the title became the company, and the digest's first
+  // real posting — a Director of Operations at Capstone Logistics — vanished.
+  const body = `Your job alert for director of distribution in North America
+
+New jobs match your preferences.
+
+Director of Operations
+Capstone Logistics, LLC
+Virginia, United States
+Fast growing
+Apply with resume & profile
+View job: https://www.linkedin.com/comm/jobs/view/4456521315/?trackingId=x
+
+---------------------------------------------------------
+
+Head Of Supply Chain
+Pyka
+Alameda, CA
+View job: https://www.linkedin.com/comm/jobs/view/4457532020/?trackingId=x
+
+---------------------------------------------------------
+
+See all jobs on LinkedIn: https://www.linkedin.com/comm/jobs/search-results/?keywords=x`;
+
+  const out = parseLinkedInAlert(body);
+  assertEquals(out.length, 2);
+  assertEquals(out[0].title, "Director of Operations");
+  assertEquals(out[0].company, "Capstone Logistics, LLC");
+  assertEquals(out[0].location, "Virginia, United States");
+  assertEquals(out[0].ats_job_id, "li-4456521315");
+  assertEquals(out[1].title, "Head Of Supply Chain");
+});
+
+Deno.test("an unrecognized badge cannot displace the posting fields", () => {
+  // "Top applicant" was not in the badge list when the first real digests were
+  // parsed. LinkedIn prints badges BELOW the location, so reading forward makes
+  // an unknown one harmless — it lands after the three fields that matter.
+  const body = `Your job alert for x
+
+Director Global Logistics
+LHH
+Costa Mesa, CA
+Some Brand New Linkedin Badge
+View job: https://www.linkedin.com/comm/jobs/view/4457195465/?trackingId=x
+
+---------------------------------------------------------
+
+See all jobs on LinkedIn: https://www.linkedin.com/comm/jobs/search-results/?keywords=x`;
+  const out = parseLinkedInAlert(body);
+  assertEquals(out.length, 1);
+  assertEquals(out[0].title, "Director Global Logistics");
+  assertEquals(out[0].company, "LHH");
+});
