@@ -12,7 +12,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import Anthropic from "npm:@anthropic-ai/sdk@0";
 import {
   MODEL, runScore, SCHEMA, SYSTEM,
-  type Ask, type Company, type Job, type Resume, type ScoreRow,
+  type Ask, type Company, type Job, type Resume, type ScoreRow, type Verdict,
 } from "../_shared/score.ts";
 
 const BUDGET_MS = Number(Deno.env.get("JOBSCOUT_SCORE_BUDGET_MS") ?? 120_000);
@@ -60,15 +60,32 @@ Deno.serve(async () => {
   const resume = resumes[0] as Resume;
 
   // Postings this resume has not been scored against yet.
+  // Already-scored postings, WITH their verdicts: a copy of a job already
+  // judged inherits that verdict instead of buying another call.
   const { data: scored } = await admin
-    .from("scores").select("job_id").eq("resume_id", resume.id);
-  const already = new Set((scored ?? []).map((s: { job_id: number }) => s.job_id));
+    .from("scores")
+    .select("job_id,fit_score,verdict,why_fits,why_not,resume_angle")
+    .eq("resume_id", resume.id);
+  const verdicts = new Map(
+    (scored ?? []).map((s: Record<string, unknown>) => [s.job_id as number, {
+      fit_score: s.fit_score as number,
+      verdict: s.verdict as Verdict["verdict"],
+      why_fits: (s.why_fits ?? "") as string,
+      why_not: (s.why_not ?? "") as string,
+      resume_angle: (s.resume_angle ?? "") as string,
+    }]),
+  );
+  const already = new Set(verdicts.keys());
 
   const { data: allJobs, error: jErr } = await admin
     .from("jobs").select("*").eq("is_open", true)
     .order("first_seen", { ascending: false }).limit(2000);
   if (jErr) return json({ ok: false, error: jErr.message }, 500);
-  const jobs = ((allJobs ?? []) as Job[]).filter((j) => !already.has(j.id));
+  const open = (allJobs ?? []) as Job[];
+  const jobs = open.filter((j) => !already.has(j.id));
+  const known = open
+    .filter((j) => already.has(j.id))
+    .map((j) => ({ job: j, verdict: verdicts.get(j.id)! }));
 
   const { data: cos } = await admin.from("companies").select("*");
   const companies = new Map<number, Company>(
@@ -126,7 +143,7 @@ Deno.serve(async () => {
 
   try {
     const report = await runScore({
-      resume, jobs, companies, ask, save,
+      resume, jobs, known, companies, ask, save,
       budgetMs: BUDGET_MS, limit: LIMIT,
     });
     await admin.from("runs").insert({

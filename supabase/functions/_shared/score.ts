@@ -7,7 +7,7 @@
 // The model call is INJECTED (`ask`), so calibration, batching, cost accounting
 // and the schema contract are all testable without spending a token.
 
-import { groupDuplicates, mergedLocation, representative } from "./dedupe.ts";
+import { groupDuplicates, mergedLocation, representative, sameJob } from "./dedupe.ts";
 
 export const MODEL = "claude-opus-5";
 
@@ -190,7 +190,18 @@ export interface ScoreReport {
 
 export interface ScoreDeps {
   resume: Resume;
+  /** Postings not yet scored against this resume. */
   jobs: Job[];
+  /**
+   * Postings ALREADY scored, with the verdict they were given.
+   *
+   * Grouping only the unscored queue leaves the commonest duplicate unhandled:
+   * a job crawled and scored yesterday, surfaced by an alert today. Its twin is
+   * not in the queue to be grouped with, so it buys a fresh call and lands on
+   * the shortlist twice — every day, for as long as both stay open. Matching
+   * against what is already judged closes that.
+   */
+  known?: { job: Job; verdict: Verdict }[];
   companies: Map<number, Company>;
   ask: Ask;
   save: (rows: ScoreRow[]) => Promise<void>;
@@ -213,17 +224,34 @@ export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
   // The caller decides what deserves scoring. Stage-1 filtering lives in
   // filters.ts and runs at WRITE time, which keeps the geo gazetteer — 130KB+
   // of postal data — out of this function's deploy bundle entirely.
+  // A posting already judged answers for its copies without another call.
+  const known = deps.known ?? [];
+  const inherited: ScoreRow[] = [];
+  const fresh: Job[] = [];
+  for (const j of deps.jobs) {
+    const match = known.find((k) => sameJob(k.job, j));
+    if (match) {
+      inherited.push({
+        ...match.verdict,
+        fit_score: clampScore(match.verdict.fit_score),
+        job_id: j.id,
+        resume_id: deps.resume.id,
+        model: MODEL,
+      });
+    } else fresh.push(j);
+  }
+
   // One job posted five times is one job. Group first, then take `limit` from
   // the GROUPS — otherwise a single employer's multi-store listing eats the
   // whole budget and everything behind it waits for the next run.
-  const groups = groupDuplicates(deps.jobs).slice(0, limit);
-  const collapsed = groups.reduce((n, g) => n + g.length - 1, 0);
+  const groups = groupDuplicates(fresh).slice(0, limit);
+  const collapsed = groups.reduce((n, g) => n + g.length - 1, 0) + inherited.length;
   const prefix = resumePrefix(deps.resume);
 
   const usage: Usage = { input: 0, cached: 0, output: 0 };
   const failures: ScoreReport["failures"] = [];
-  let batch: ScoreRow[] = [];
-  let scored = 0;
+  let batch: ScoreRow[] = [...inherited];
+  let scored = inherited.length;
   let processed = 0;
   let inARow = 0;
   let aborted: string | undefined;

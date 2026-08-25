@@ -340,3 +340,63 @@ Deno.test("the limit counts JOBS, not copies", () => {
     assertEquals(report.scored, 5); // 4 copies + 1 — the Director was reached
   })();
 });
+
+Deno.test("a job already judged answers for its copies without another call", () => {
+  // The commonest duplicate in practice, and the one grouping the queue alone
+  // does not catch: a job crawled and scored yesterday, surfaced by an alert
+  // today. Its twin is not in the unscored queue to be grouped with, so it
+  // bought a fresh call and landed on the shortlist twice — every day, for as
+  // long as both stayed open.
+  return (async () => {
+    let calls = 0;
+    const saved: ScoreRow[] = [];
+    const report = await runScore({
+      resume: RESUME,
+      companies: CO,
+      known: [{
+        job: job(40, "Manager, Logistics (North America)", "Buffalo, NY"),
+        verdict: { ...VERDICT, fit_score: 58 },
+      }],
+      jobs: [
+        // The alert copy: same employer, same title, no description.
+        { id: 2, company_id: 9, title: "Manager, Logistics (North America)", location: "Buffalo, NY" },
+        job(99, "Operations Director", "Buffalo, NY"),
+      ],
+      ask: () => {
+        calls++;
+        return Promise.resolve({ verdict: VERDICT, usage: { input: 1, cached: 0, output: 1 } });
+      },
+      save: (rows) => {
+        saved.push(...rows);
+        return Promise.resolve();
+      },
+    });
+
+    assertEquals(calls, 1);                     // only the genuinely new job
+    assertEquals(report.duplicates_collapsed, 1);
+    assertEquals(report.scored, 2);
+    // The copy inherits the verdict it should have had, not a fresh guess.
+    assertEquals(saved.find((r) => r.job_id === 2)?.fit_score, 58);
+  })();
+});
+
+Deno.test("a job that only resembles a scored one still gets judged", () => {
+  // Inheriting is a claim that two rows are the same job. A different title at
+  // the same employer is a different job, and must not be answered by proxy.
+  return (async () => {
+    let calls = 0;
+    const report = await runScore({
+      resume: RESUME,
+      companies: CO,
+      known: [{ job: job(40, "Manager, Logistics"), verdict: { ...VERDICT, fit_score: 58 } }],
+      jobs: [job(2, "Director of Logistics")],
+      ask: () => {
+        calls++;
+        return Promise.resolve({ verdict: VERDICT, usage: { input: 1, cached: 0, output: 1 } });
+      },
+      save: () => Promise.resolve(),
+    });
+    assertEquals(calls, 1);
+    assertEquals(report.duplicates_collapsed, 0);
+  })();
+});
