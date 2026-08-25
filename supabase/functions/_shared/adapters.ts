@@ -225,12 +225,116 @@ export async function fetchWorkday(c: Company, call: FetchJson): Promise<Posting
   return out;
 }
 
+
+/**
+ * ADP WorkforceNow.
+ *
+ * The matter of coverage, not elegance: four in-radius employers sit behind
+ * ADP — Sonwil Distribution Center, McGard, PCB Piezotronics and New Era Cap —
+ * and three of those are exactly the private, single-site WNY manufacturers
+ * this search is aimed at. Discovery found them months before anything could
+ * read them.
+ *
+ * ADP publishes no documented API, but its own career-centre front end reads
+ * these public endpoints, and the board_token discovery already stores is the
+ * `cid` GUID they key on. Every field name below was read off a live response
+ * from Sonwil's board rather than guessed.
+ *
+ * Unusually, ADP returns pay as NUMBERS (payGradeRange), so these postings
+ * arrive with real compensation instead of a sentence to parse.
+ */
+const ADP_BASE =
+  "https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions";
+
+/**
+ * ADP states an amount and a currency but never a UNIT — 19.56 and 95000 look
+ * the same in the JSON. Nobody earns $19.56 a year and nobody earns $95,000 an
+ * hour, so the magnitude settles it. The threshold sits well clear of both
+ * (a $999/hr consultant and a $1,000/yr stipend are not roles this searches
+ * for), and the unit travels with the value so the scorer is never left to
+ * guess whether $22 means an hour or a year.
+ */
+export function adpPay(range: unknown): string | null {
+  const r = (range ?? {}) as Any;
+  const lo = r?.minimumRate?.amountValue;
+  const hi = r?.maximumRate?.amountValue;
+  const n = typeof lo === "number" ? lo : typeof hi === "number" ? hi : null;
+  if (n === null) return null;
+  const per = n < 1000 ? "per hour" : "per year";
+  const fmt = (v: number) =>
+    `$${v.toLocaleString("en-US", { maximumFractionDigits: n < 1000 ? 2 : 0 })}`;
+  if (typeof lo === "number" && typeof hi === "number" && hi !== lo) {
+    return `${fmt(lo)} - ${fmt(hi)} ${per}`;
+  }
+  return `${fmt(n)} ${per}`;
+}
+
+/** "BUFFALO, NY" from the address, falling back to ADP's own display name. */
+export function adpLocation(locs: unknown): string | null {
+  const first = (Array.isArray(locs) ? locs[0] : null) as Any;
+  if (!first) return null;
+  const a = first.address ?? {};
+  const city = a.cityName ? String(a.cityName).trim() : "";
+  const st = a.countrySubdivisionLevel1?.codeValue ?? "";
+  const zip = a.postalCode ?? "";
+  // Prefer city + state + ZIP: the ZIP lets the radius gate resolve exactly
+  // rather than by name, which is the difference between a match and a guess.
+  const built = [city && st ? `${city}, ${st}` : city || st, zip]
+    .filter(Boolean).join(" ").trim();
+  if (built) return built;
+  const short = first.nameCode?.shortName;
+  return short ? String(short).trim() : null;
+}
+
+export async function fetchAdp(c: Company, get: FetchJson): Promise<Posting[]> {
+  const cid = c.board_token;
+  const tz = "America%2FNew_York";
+  const page = 50;
+  const out: Posting[] = [];
+
+  for (let skip = 0; skip < 1000; skip += page) {
+    const d = await get(
+      `${ADP_BASE}?cid=${cid}&timeZoneId=${tz}&%24top=${page}&%24skip=${skip}`,
+    ) as Any;
+    const items: Any[] = d?.jobRequisitions ?? [];
+    for (const j of items) {
+      const id = String(j.itemID ?? "");
+      if (!id) continue;
+      out.push(posting({
+        ats_job_id: id,
+        title: j.requisitionTitle ?? "",
+        location: adpLocation(j.requisitionLocations),
+        comp_text: adpPay(j.payGradeRange),
+        posted_at: iso(j.postDate),
+        url: `https://workforcenow.adp.com/mascsr/default/mdf/recruitment/` +
+          `recruitment.html?cid=${cid}&jobId=${id}&lang=en_US`,
+      }));
+    }
+    if (items.length < page) break;
+  }
+
+  // The description lives only on the detail endpoint, one call per posting.
+  for (const row of out) {
+    try {
+      const det = await get(
+        `${ADP_BASE}/${row.ats_job_id}?cid=${cid}&timeZoneId=${tz}`,
+      ) as Any;
+      row.description = stripHtml(det?.requisitionDescription) || null;
+    } catch {
+      // Same rule as SmartRecruiters and Workday: keep the posting, lose the
+      // description. A posting we cannot fully describe still beats silence.
+    }
+  }
+  return out;
+}
+
 export const ADAPTERS: Record<string, (c: Company, f: FetchJson) => Promise<Posting[]>> = {
   greenhouse: fetchGreenhouse,
   lever: fetchLever,
   ashby: fetchAshby,
   smartrecruiters: fetchSmartRecruiters,
   workday: fetchWorkday,
+  adp: fetchAdp,
 };
 
 /** ATS we can ingest today. Everything else is detected but needs an adapter. */

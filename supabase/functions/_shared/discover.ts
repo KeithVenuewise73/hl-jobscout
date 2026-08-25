@@ -14,7 +14,7 @@
 // tests/discover.test.ts asserts this list still equals Object.keys(ADAPTERS),
 // so adding an adapter without updating it fails the suite.
 export const INGESTIBLE = new Set([
-  "greenhouse", "lever", "ashby", "smartrecruiters", "workday",
+  "greenhouse", "lever", "ashby", "smartrecruiters", "workday", "adp",
 ]);
 
 export interface Detection {

@@ -82,8 +82,16 @@ Then score on:
   25 — that is a walk-away. Inside the TARGET BAND, treat it as a positive. \
 Between floor and band, it is workable but say so in why_not. Judge only pay the
   posting actually STATES; never infer a salary from the title or the employer.
-- Location: he is open to remote, and at this level remote and
-  hybrid-with-travel are normal. A remote role is not penalised for being remote.
+- Location. He is based in Buffalo, NY and is OPEN TO LOCATION-INDEPENDENT
+  WORK: fully remote, home-based with travel, or a territory/multi-site role run
+  from anywhere. At this level those are normal, and none of them is a negative.
+  Judge whether the role actually requires daily presence at one site. A posting
+  headed "Director, North America Logistics" carrying a Dallas address is a
+  TERRITORY, not a commute — the address is where the company sits, not where
+  the work happens, and it should not be marked down for that. Say so in
+  why_not only when the posting genuinely demands relocation or on-site
+  presence he cannot give from Buffalo. Heavy travel is acceptable; note the
+  amount if the posting states it.
 - If the posting has no description, score on title and employer only and cap at 55.
 
 why_not is the real risk or gap, not a hedge. resume_angle is the specific

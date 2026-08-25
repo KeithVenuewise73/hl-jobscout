@@ -4,10 +4,10 @@
 // JSON shape will still break ingest and these will still pass; only a real
 // crawl catches that.
 
-import { assertEquals, assertStringIncludes } from "./assert.ts";
+import { assertEquals, assertStringIncludes, assertTrue } from "./assert.ts";
 import {
-  fetchAshby, fetchGreenhouse, fetchLever, fetchSmartRecruiters, fetchWorkday,
-  iso, stripHtml,
+  adpLocation, adpPay, fetchAdp, fetchAshby, fetchGreenhouse, fetchLever,
+  fetchSmartRecruiters, fetchWorkday, iso, stripHtml,
 } from "../_shared/adapters.ts";
 import type { FetchJson } from "../_shared/adapters.ts";
 
@@ -164,4 +164,113 @@ Deno.test("iso", () => {
   assertEquals(iso("not a date"), null);
   assertEquals(iso(null), null);
   assertEquals(iso(""), null);
+});
+
+Deno.test("ADP: the listing maps to postings, with pay as a real number", () => {
+  // Field names below are verbatim from a live response on Sonwil's board —
+  // not guessed. ADP is unusual in returning pay as numbers rather than prose.
+  return (async () => {
+    const calls: string[] = [];
+    const get: FetchJson = (url) => {
+      calls.push(url);
+      if (url.includes("/9201845720623_1?")) {
+        return Promise.resolve({
+          requisitionDescription:
+            "<div><p><strong>Job purpose</strong></p><p>Run the shift.</p></div>",
+        });
+      }
+      if (url.includes("%24skip=0")) {
+        return Promise.resolve({
+          jobRequisitions: [{
+            itemID: "9201845720623_1",
+            requisitionTitle: "Operations Manager",
+            postDate: "2026-08-17T15:47:00.000-04:00",
+            payGradeRange: {
+              minimumRate: { amountValue: 95000, currencyCode: "USD" },
+              maximumRate: { amountValue: 125000, currencyCode: "USD" },
+            },
+            requisitionLocations: [{
+              address: {
+                cityName: "BUFFALO",
+                postalCode: "14218",
+                countrySubdivisionLevel1: { codeValue: "NY" },
+              },
+              nameCode: { shortName: " BUFFALO, NY, US" },
+            }],
+          }],
+        });
+      }
+      return Promise.resolve({ jobRequisitions: [] });
+    };
+
+    const rows = await fetchAdp(
+      { board_token: "7a483835-9c14-464f-a78e-f6e21d9d4b61" },
+      get,
+    );
+    assertEquals(rows.length, 1);
+    assertEquals(rows[0].ats_job_id, "9201845720623_1");
+    assertEquals(rows[0].title, "Operations Manager");
+    assertEquals(rows[0].comp_text, "$95,000 - $125,000 per year");
+    // The ZIP is carried so the radius gate can resolve exactly, not by name.
+    assertEquals(rows[0].location, "BUFFALO, NY 14218");
+    assertStringIncludes(rows[0].description ?? "", "Job purpose");
+    assertStringIncludes(rows[0].url ?? "", "jobId=9201845720623_1");
+    assertTrue((rows[0].posted_at ?? "").startsWith("2026-08-17"));
+  })();
+});
+
+Deno.test("ADP pay: the unit is inferred from magnitude, because ADP states none", () => {
+  // 19.56 and 95000 are indistinguishable in the JSON — there is no unit field.
+  // Getting this wrong is not cosmetic: the scorer caps a job at 25 when pay is
+  // below the floor, so "$19.56 per year" would reject a real role, and
+  // "$95,000 per hour" would promote a warehouse shift.
+  assertEquals(
+    adpPay({ minimumRate: { amountValue: 19.56 }, maximumRate: { amountValue: 22.15 } }),
+    "$19.56 - $22.15 per hour",
+  );
+  assertEquals(
+    adpPay({ minimumRate: { amountValue: 95000 }, maximumRate: { amountValue: 125000 } }),
+    "$95,000 - $125,000 per year",
+  );
+  // One-sided and equal ranges collapse to a single figure.
+  assertEquals(adpPay({ minimumRate: { amountValue: 110000 } }), "$110,000 per year");
+  assertEquals(
+    adpPay({ minimumRate: { amountValue: 110000 }, maximumRate: { amountValue: 110000 } }),
+    "$110,000 per year",
+  );
+  // No pay stated is null, never a fabricated zero.
+  assertEquals(adpPay({}), null);
+  assertEquals(adpPay(null), null);
+});
+
+Deno.test("ADP location falls back to the display name when the address is thin", () => {
+  assertEquals(adpLocation([{ nameCode: { shortName: " REMOTE, US" } }]), "REMOTE, US");
+  assertEquals(adpLocation([]), null);
+  assertEquals(adpLocation(null), null);
+  // City with no ZIP still yields something the gazetteer can resolve.
+  assertEquals(
+    adpLocation([{ address: { cityName: "Depew", countrySubdivisionLevel1: { codeValue: "NY" } } }]),
+    "Depew, NY",
+  );
+});
+
+Deno.test("ADP paginates until a short page, and stops", () => {
+  return (async () => {
+    let pages = 0;
+    const get: FetchJson = (url) => {
+      if (url.includes("job-requisitions/")) return Promise.resolve({});
+      pages++;
+      // Two full pages then a short one.
+      const n = pages <= 2 ? 50 : 3;
+      return Promise.resolve({
+        jobRequisitions: Array.from({ length: n }, (_, i) => ({
+          itemID: `p${pages}-${i}`,
+          requisitionTitle: "Manager",
+        })),
+      });
+    };
+    const rows = await fetchAdp({ board_token: "x" }, get);
+    assertEquals(rows.length, 103);
+    assertEquals(pages, 3);
+  })();
 });

@@ -1,109 +1,14 @@
-// Stage-1 filters. These run before a single token is spent, so a bug here is
-// either wasted money (too loose) or a job you never see (too tight).
-//
-// Ported from score.py. Matching is WHOLE-WORD on purpose: the original
-// substring list had "associate " with a trailing space, which never matches a
-// title *ending* in "Associate" — so every warehouse-associate posting reached
-// the model despite a filter existing to stop exactly that.
+// Location filters, and the stage-1 gate that combines them with the title
+// rules. The title rules themselves live in titles.ts, which deliberately does
+// NOT reach geo.ts and its generated gazetteer — see the note there.
 
 import { DEFAULT_RADIUS_MILES, withinRadius } from "./geo.ts";
+import { titleOk } from "./titles.ts";
 
-export { DEFAULT_RADIUS_MILES, withinRadius };
-
-// Matched with a left word boundary only, so "operation" also catches
-// "Operational Excellence". Tuned against Keith's actual career: the titles he
-// has held (Market Manager at CRST, Operations Manager - Last Mile at RXO,
-// Distribution Manager at Arctic Glacier) and the ones he should be shown.
-export const TITLE_INCLUDE = [
-  "operations", "operation", "plant", "production", "warehouse", "distribution",
-  "logistics", "supply chain", "transportation", "fleet", "dispatch",
-  "general manager", "site manager", "branch manager", "market manager",
-  "area manager", "regional manager", "district manager",
-  // Target level: Senior Manager / Director of Operations and up.
-  "senior manager", "sr manager", "sr. manager", "head of", "chief",
-  "vice president", "senior director", "executive director",
-  "facility", "facilities", "field service", "service manager", "terminal",
-  "director", "president", "chief operating",
-  "continuous improvement", "process improvement", "3pl", "last mile",
-  "final mile", "delivery", "shipping", "receiving", "inventory",
-  "route", "carrier", "depot",
-];
-
-// Short/ambiguous terms that need boundaries on BOTH sides — left-bounded
-// "hub" matches "Hubbard", "vp" matches "VPN".
-// "Mgr US Brokerage" and "Ops Director" are real postings that died on the
-// spelled-out list. Bounded on both sides so they cannot match inside a word.
-export const TITLE_INCLUDE_EXACT = [
-  "vp", "coo", "gm", "hub", "dsd", "dc", "mgr", "ops", "svp", "avp",
-];
-
-// These beat the exclusion list. "Driver Manager" is a transportation
-// management job, not a driving job, and the rule that kills "Delivery Driver"
-// would otherwise kill it too. Same for "Associate Director", which is a senior
-// title the "associate" rule was never aimed at.
-export const TITLE_RESCUE = [
-  "driver manager", "driver supervisor", "driver lead",
-  "associate director", "associate vice president",
-];
-
-export const TITLE_EXCLUDE = [
-  // Unambiguously below the target level. Anything arguable — a plain
-  // "Manager", a "Supervisor" at a real industrial site — is left IN and judged
-  // by the model, which reads scope from the description. A keyword cannot tell
-  // a 80-person DC manager from a shift lead; the posting can.
-  // Warehouse-floor roles. The include list carries broad function words
-  // ("warehouse", "shipping", "inventory") that are right in a manager title
-  // and wrong on their own — one real Indeed digest of 11 "distribution jobs"
-  // was 11 floor roles at $17-25/hour, and three of them bought model calls.
-  "warehouse worker", "warehouse associate", "warehouse clerk",
-  "warehouse lead", "warehouse team lead", "dock lead", "line lead",
-  "material handler", "load operator", "forklift", "order selector",
-  "1st shift", "2nd shift", "3rd shift", "stockroom", "stocker",
-  "assistant manager", "assistant director", "associate manager",
-  "shift supervisor", "shift lead", "shift manager", "team lead",
-  "crew lead", "crew leader", "trainee", "management trainee",
-  "intern", "internship", "associate", "clerk", "driver", "cdl",
-  "technician", "engineer i", "software", "nurse", "rn", "physician",
-  "sales representative", "cashier", "part-time", "part time", "seasonal",
-  "loader", "unloader", "picker", "packer", "custodian", "janitor",
-  "entry level", "apprentice", "co-op",
-];
-
-const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const EXCLUDE_RE = new RegExp(`\\b(?:${TITLE_EXCLUDE.map(esc).join("|")})\\b`, "i");
-const INCLUDE_RE = new RegExp(`\\b(?:${TITLE_INCLUDE.map(esc).join("|")})`, "i");
-const INCLUDE_EXACT_RE = new RegExp(`\\b(?:${TITLE_INCLUDE_EXACT.map(esc).join("|")})\\b`, "i");
-const RESCUE_RE = new RegExp(`\\b(?:${TITLE_RESCUE.map(esc).join("|")})\\b`, "i");
-
-/**
- * A title must name a LEVEL, not just a function.
- *
- * The include list carries broad function words — "warehouse", "shipping",
- * "logistics", "inventory" — which are right inside "Warehouse Manager" and
- * wrong on their own. One real Indeed digest of eleven "distribution jobs" was
- * eleven floor roles at $17-25/hour, and "WAREHOUSE OPERATIONS", "Shipping and
- * Receiving" and "Logistics Customer Service Representative" all bought model
- * calls off those function words alone.
- *
- * Chasing that with more exclusions is endless. Requiring a level word is one
- * rule, and it is the actual target: Senior Manager / Director and up.
- */
-const SENIORITY_RE =
-  /\b(manager|mgr|managing|director|head|chief|officer|president|vp|svp|avp|coo|gm|superintendent|supervisor|executive|principal|lead|leader)\b/i;
-
-// "lead" counts as a level word above, because "Operational Excellence Lead"
-// and "Continuous Improvement Lead" are plausible fits. The junior leads are
-// caught by TITLE_EXCLUDE, which runs first — an inclusion error costs a model
-// call, an exclusion error costs an opportunity.
-
-export function titleOk(t: string | null | undefined): boolean {
-  const s = t ?? "";
-  if (RESCUE_RE.test(s)) return true;          // rescue beats exclude
-  if (EXCLUDE_RE.test(s)) return false;
-  if (!SENIORITY_RE.test(s)) return false;     // function without a level
-  return INCLUDE_RE.test(s) || INCLUDE_EXACT_RE.test(s);
-}
+export { DEFAULT_RADIUS_MILES, titleOk, withinRadius };
+export {
+  TITLE_EXCLUDE, TITLE_INCLUDE, TITLE_INCLUDE_EXACT, TITLE_RESCUE,
+} from "./titles.ts";
 
 /**
  * Radius gate. Delegates to geo.ts, which measures real distance from Buffalo.
@@ -124,6 +29,78 @@ export interface FilterableJob {
   location?: string | null;
 }
 
+// ---- location independence -------------------------------------------------
+//
+// The radius gate answers "can he drive there". That is the wrong question for
+// a whole class of roles he is qualified for and open to.
+//
+// Measured, not assumed: one national digest carried six Director/Head-level
+// postings and the radius gate dropped every one — including a role whose own
+// title said "Remote", because LinkedIn had filed it under the employer's
+// head-office city. An exclusion error costs an opportunity permanently and
+// silently; an inclusion error costs a cent or two and gets a real verdict
+// from the model. So these signals ADMIT, and the scorer decides.
+
+/** The title says remote even when the location field names a city. */
+const REMOTE_TITLE =
+  /\b(remote|virtual|work from home|wfh|telecommut\w*|home[- ]based|anywhere)\b/i;
+
+/**
+ * Scope that makes a role location-independent in practice.
+ *
+ * A "Director, North America Logistics" is not a commute — it is a territory,
+ * usually run from anywhere with travel. The employer's address on the posting
+ * is where the company is, not where the work happens. Same for national,
+ * global and multi-site titles at this level.
+ */
+const TRAVELLING_SCOPE =
+  /\b(north america|nationwide|national|global|international|multi[- ]?(site|unit|state)|field (operations|service|based)|travel(l?ing)?|territory|division(al)?)\b/i;
+
+export type PlaceReason =
+  | "in_radius"
+  | "remote_title"
+  | "travelling_scope"
+  | "out_of_area";
+
+export interface PlaceVerdict {
+  ok: boolean;
+  reason: PlaceReason;
+}
+
+export interface EligibilityOptions {
+  radiusMiles?: number;
+  /**
+   * Admit remote and territory roles that sit outside the radius. Off by
+   * default so the gate stays honest for anyone who wants a commute only;
+   * Keith has it ON — it is the difference between a metro and a country.
+   */
+  locationIndependent?: boolean;
+}
+
+/**
+ * Where a posting stands, and why. The reason is returned rather than a bare
+ * boolean so a caller can report WHY a job was admitted — a Dallas address
+ * admitted on a "North America" title is a different fact from one in Amherst.
+ */
+export function placeOk(
+  job: FilterableJob,
+  opts: EligibilityOptions = {},
+): PlaceVerdict {
+  const radiusMiles = opts.radiusMiles ?? DEFAULT_RADIUS_MILES;
+  if (withinRadius(job.location, radiusMiles).ok) {
+    return { ok: true, reason: "in_radius" };
+  }
+  if (opts.locationIndependent) {
+    // The title is checked, not just the location field. That is the whole
+    // point: the posting that got away said "Remote" in its own title.
+    if (REMOTE_TITLE.test(job.title)) return { ok: true, reason: "remote_title" };
+    if (TRAVELLING_SCOPE.test(job.title)) {
+      return { ok: true, reason: "travelling_scope" };
+    }
+  }
+  return { ok: false, reason: "out_of_area" };
+}
+
 /**
  * Stage 1: the free filters, applied before a single token is spent.
  *
@@ -135,7 +112,9 @@ export interface FilterableJob {
  */
 export function eligible<T extends FilterableJob>(
   jobs: T[],
-  radiusMiles = DEFAULT_RADIUS_MILES,
+  opts: EligibilityOptions | number = {},
 ): T[] {
-  return jobs.filter((j) => titleOk(j.title) && locationOk(j.location, radiusMiles));
+  // A bare number still means "radius", so older callers keep working.
+  const o = typeof opts === "number" ? { radiusMiles: opts } : opts;
+  return jobs.filter((j) => titleOk(j.title) && placeOk(j, o).ok);
 }

@@ -1,6 +1,6 @@
 import { assertEquals, assertStringIncludes, assertTrue } from "./assert.ts";
 import {
-  clampScore, postingBlock, resumePrefix, runScore, SCHEMA,
+  clampScore, postingBlock, resumePrefix, runScore, SCHEMA, SYSTEM,
   type Ask, type Job, type Resume, type ScoreRow,
 } from "../_shared/score.ts";
 import { eligible } from "../_shared/filters.ts";
@@ -238,4 +238,14 @@ Deno.test("an out-of-range score is clamped before it reaches the database", () 
     assertEquals(saved.length, 1);
     assertEquals(saved[0].fit_score, 100);
   })();
+});
+
+Deno.test("the scorer is told that a distant address on a territory role is not a fault", () => {
+  // The gate and the prompt have to move together. Admitting national and
+  // remote postings while the prompt still reads location as a commute just
+  // produces a longer list of low scores — worse than not admitting them,
+  // because it looks like the model considered them and said no.
+  assertStringIncludes(SYSTEM, "LOCATION-INDEPENDENT");
+  assertStringIncludes(SYSTEM, "TERRITORY, not a commute");
+  assertStringIncludes(SYSTEM, "Heavy travel is acceptable");
 });

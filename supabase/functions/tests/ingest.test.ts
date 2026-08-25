@@ -129,3 +129,42 @@ Deno.test("one company failing does not stop the others", async () => {
   assertEquals(r.postings_seen, 1);
   assertEquals(db.crawled, [2]);
 });
+
+Deno.test("a crawl writes only postings at the right level, and says how many it dropped", () => {
+  // Nothing filtered an ATS crawl before this. Survivable while the only
+  // crawlable boards were three Workday tenants; not survivable with ADP —
+  // Sonwil's board is mostly warehouse shifts at $19.56/hour, and the scorer
+  // pays for every open posting it has not already judged.
+  return (async () => {
+    const written: JobRow[] = [];
+    const report = await runIngest({
+      db: {
+        dueCompanies: () =>
+          Promise.resolve([{ id: 1, name: "Sonwil", ats: "adp", board_token: "x" }]),
+        upsertJobs: (rows) => {
+          written.push(...rows);
+          return Promise.resolve();
+        },
+        closeStale: () => Promise.resolve(0),
+        markCrawled: () => Promise.resolve(),
+      },
+      http: () =>
+        Promise.resolve({
+          jobRequisitions: [
+            { itemID: "1", requisitionTitle: "Warehouse Specialist - 1st Shift" },
+            { itemID: "2", requisitionTitle: "Operations Manager" },
+            { itemID: "3", requisitionTitle: "Forklift Operator" },
+            { itemID: "4", requisitionTitle: "Director of Distribution" },
+          ],
+        }),
+    });
+
+    assertEquals(written.length, 2);
+    assertEquals(written.map((r) => r.title).sort(),
+      ["Director of Distribution", "Operations Manager"]);
+    // Never a silent cap — a filter bug must not read as "nothing open".
+    assertEquals(report.postings_below_level, 2);
+    assertEquals(report.detail[0].below_level, 2);
+    assertEquals(report.postings_seen, 2);
+  })();
+});

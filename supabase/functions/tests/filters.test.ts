@@ -1,5 +1,5 @@
-import { assertEquals } from "./assert.ts";
-import { locationOk, titleOk } from "../_shared/filters.ts";
+import { assertEquals, assertTrue } from "./assert.ts";
+import { eligible, locationOk, placeOk, titleOk } from "../_shared/filters.ts";
 
 const KEEP = [
   "Director of Operations", "Plant Manager", "VP, Supply Chain",
@@ -143,4 +143,83 @@ Deno.test("locationOk — unknown location is not a reason to spend nothing", ()
   assertEquals(locationOk(null), true);
   assertEquals(locationOk(""), true);
   assertEquals(locationOk(undefined), true);
+});
+
+Deno.test("the posting that got away: 'Remote' in the title, a city in the field", () => {
+  // Real miss. LinkedIn filed "Director of Logistics - Remote Healthcare
+  // Screening" under Winter Park, FL — the employer's address — and the radius
+  // gate dropped it. The title said remote; nothing was reading the title.
+  const j = {
+    title: "Director of Logistics - Remote Healthcare Screening",
+    location: "Winter Park, FL",
+  };
+  assertEquals(placeOk(j).ok, false);
+  assertEquals(placeOk(j, { locationIndependent: true }).reason, "remote_title");
+});
+
+Deno.test("a territory title is location-independent, whatever address is on it", () => {
+  // "Director, North America Logistics" is a territory, not a commute. The
+  // address on the posting is where the company sits, not where the work is.
+  for (const t of [
+    "Director, North America Logistics",
+    "National Director of Operations",
+    "Global Head of Supply Chain",
+    "Multi-Site Operations Director",
+    "Divisional Operations Manager",
+    "Director of Field Operations",
+  ]) {
+    const v = placeOk({ title: t, location: "Costa Mesa, CA" }, { locationIndependent: true });
+    assertEquals(v.ok, true, t);
+    assertEquals(v.reason, "travelling_scope", t);
+  }
+});
+
+Deno.test("location independence is opt-in and does not weaken the radius", () => {
+  // Someone who wants a commute only must still get a commute only.
+  const j = { title: "National Director of Operations", location: "Dallas, TX" };
+  assertEquals(placeOk(j).ok, false);
+  assertEquals(placeOk(j).reason, "out_of_area");
+  // And a genuinely local job is still reported as local, not as a territory.
+  const local = { title: "National Director of Operations", location: "Amherst, NY" };
+  assertEquals(placeOk(local, { locationIndependent: true }).reason, "in_radius");
+});
+
+Deno.test("an ordinary out-of-area job stays out, even with independence on", () => {
+  // The expansion must admit territory and remote roles, NOT everything.
+  // A plain plant manager in Dallas is still a relocation, not a commute.
+  for (const t of ["Plant Manager", "Warehouse Operations Manager", "Distribution Manager"]) {
+    const v = placeOk({ title: t, location: "Dallas, TX" }, { locationIndependent: true });
+    assertEquals(v.ok, false, t);
+  }
+});
+
+Deno.test("eligible() still accepts a bare radius number", () => {
+  // Older callers pass a number. Breaking them silently would narrow the search
+  // without anyone noticing.
+  const jobs = [
+    { title: "Operations Director", location: "Buffalo, NY" },
+    { title: "Operations Director", location: "Dallas, TX" },
+  ];
+  assertEquals(eligible(jobs, 50).length, 1);
+  assertEquals(eligible(jobs, { radiusMiles: 50 }).length, 1);
+});
+
+Deno.test("with independence on, the national digest stops being thrown away", () => {
+  // The six postings from one real "director of distribution in North America"
+  // digest. Every one was dropped before; the ones that are genuinely
+  // location-independent now reach the model.
+  const digest = [
+    { title: "Director of Operations", location: "Virginia, United States" },
+    { title: "Director of Logistics - Remote Healthcare Screening", location: "Winter Park, FL" },
+    { title: "Director Global Logistics", location: "Costa Mesa, CA" },
+    { title: "Head Of Supply Chain", location: "Alameda, CA" },
+    { title: "Director of Wholesale Operations", location: "New York, NY" },
+    { title: "Head of Operations", location: "Glendale, AZ" },
+  ];
+  assertEquals(eligible(digest, { radiusMiles: 50 }).length, 0);
+  const opened = eligible(digest, { radiusMiles: 50, locationIndependent: true });
+  // The two that say so in their titles; the rest are still relocations.
+  assertEquals(opened.length, 2);
+  assertTrue(opened.some((j) => j.title.includes("Remote Healthcare")));
+  assertTrue(opened.some((j) => j.title.includes("Global Logistics")));
 });
