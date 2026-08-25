@@ -29,9 +29,25 @@ Deno.serve(async () => {
 
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) {
-    // Say what is missing. A scorer that silently scores nothing is worse
-    // than one that refuses to start.
-    return json({ ok: false, error: "ANTHROPIC_API_KEY is not set for this function" }, 503);
+    // Say what is missing, and say it usefully. "Not set" sends someone to a
+    // dashboard to guess; the overwhelmingly likely cause is a secret saved
+    // under a near-miss name, so name the near misses that ARE present.
+    //
+    // Names only. A secret's value never leaves this function, and the length
+    // is enough to tell a real key from an empty string or a stray quote.
+    const near = Object.entries(Deno.env.toObject())
+      .filter(([k]) => /ANTHROPIC|CLAUDE|_API_KEY$/i.test(k))
+      .map(([k, v]) => `${k} (${v.length} chars)`)
+      .sort();
+    return json({
+      ok: false,
+      error: "ANTHROPIC_API_KEY is not set for this function",
+      similar_secrets_present: near.length ? near : "none",
+      fix: "Add it under Edge Functions -> Secrets for this project, named " +
+        "exactly ANTHROPIC_API_KEY. Secrets are project-wide; a redeploy is " +
+        "not needed, but an in-flight function keeps the old environment for " +
+        "a few seconds.",
+    }, 503);
   }
   const claude = new Anthropic({ apiKey });
 
