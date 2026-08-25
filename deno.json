@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "test": "deno test supabase/functions/tests/",
+    "check": "deno check supabase/functions/_shared/*.ts supabase/functions/tests/*.ts",
+    "lint": "deno lint supabase/functions/"
+  },
+  "fmt": { "lineWidth": 90 }
+}

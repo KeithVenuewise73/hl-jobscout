@@ -1,0 +1,129 @@
+// jobscout-score — reads the open postings and scores them against the resume.
+//
+// WIRING ONLY. Calibration, batching, the cached-prefix layout and the cost
+// accounting all live in ../_shared/score.ts, exercised offline by
+// ../tests/score.test.ts. This file supplies a database and a model call.
+//
+// Cost shape: the system prompt and the resume are sent as a cached prefix that
+// is byte-identical for every posting in a run, so a 250-posting run pays for
+// the resume once and reads it from cache 249 times.
+
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import Anthropic from "npm:@anthropic-ai/sdk@0";
+import {
+  MODEL, runScore, SCHEMA, SYSTEM,
+  type Ask, type Company, type Job, type Resume, type ScoreRow,
+} from "../_shared/score.ts";
+
+const BUDGET_MS = Number(Deno.env.get("JOBSCOUT_SCORE_BUDGET_MS") ?? 120_000);
+const EFFORT = Deno.env.get("JOBSCOUT_SCORE_EFFORT") ?? "medium";
+const LIMIT = Number(Deno.env.get("JOBSCOUT_SCORE_LIMIT") ?? 250);
+const RESUME_LABEL = Deno.env.get("JOBSCOUT_RESUME_LABEL") ?? "keith-ops-2026";
+
+Deno.serve(async () => {
+  const admin = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { db: { schema: "jobscout" } },
+  );
+
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) {
+    // Say what is missing. A scorer that silently scores nothing is worse
+    // than one that refuses to start.
+    return json({ ok: false, error: "ANTHROPIC_API_KEY is not set for this function" }, 503);
+  }
+  const claude = new Anthropic({ apiKey });
+
+  const { data: resumes, error: rErr } = await admin
+    .from("resumes").select("*").eq("label", RESUME_LABEL).limit(1);
+  if (rErr) return json({ ok: false, error: rErr.message }, 500);
+  if (!resumes?.length) {
+    return json({ ok: false, error: `no resume labeled '${RESUME_LABEL}' — insert one first` }, 412);
+  }
+  const resume = resumes[0] as Resume;
+
+  // Postings this resume has not been scored against yet.
+  const { data: scored } = await admin
+    .from("scores").select("job_id").eq("resume_id", resume.id);
+  const already = new Set((scored ?? []).map((s: { job_id: number }) => s.job_id));
+
+  const { data: allJobs, error: jErr } = await admin
+    .from("jobs").select("*").eq("is_open", true)
+    .order("first_seen", { ascending: false }).limit(2000);
+  if (jErr) return json({ ok: false, error: jErr.message }, 500);
+  const jobs = ((allJobs ?? []) as Job[]).filter((j) => !already.has(j.id));
+
+  const { data: cos } = await admin.from("companies").select("*");
+  const companies = new Map<number, Company>(
+    ((cos ?? []) as Company[]).map((c) => [c.id!, c]),
+  );
+
+  const ask: Ask = async (prefix, posting) => {
+    const r = await claude.messages.create({
+      model: MODEL,
+      max_tokens: 2000,
+      system: SYSTEM,
+      messages: [{
+        role: "user",
+        content: [
+          // cache_control ends the cached prefix here. Everything before it is
+          // identical across postings; everything after it is this posting.
+          { type: "text", text: prefix, cache_control: { type: "ephemeral" } },
+          { type: "text", text: posting },
+        ],
+      }],
+      // Raw JSON-schema form of structured outputs: the API validates the
+      // response, so there is no JSON to repair on our side.
+      output_config: {
+        effort: EFFORT,
+        format: { type: "json_schema", schema: SCHEMA },
+      },
+      // deno-lint-ignore no-explicit-any
+    } as any);
+
+    if (r.stop_reason === "refusal") {
+      throw new Error(`refused: ${r.stop_details?.category ?? "unknown"}`);
+    }
+    const block = r.content.find((b: { type: string }) => b.type === "text");
+    if (!block) throw new Error("no text block in response");
+    return {
+      verdict: JSON.parse(block.text),
+      usage: {
+        input: (r.usage.input_tokens ?? 0) + (r.usage.cache_creation_input_tokens ?? 0),
+        cached: r.usage.cache_read_input_tokens ?? 0,
+        output: r.usage.output_tokens ?? 0,
+      },
+    };
+  };
+
+  const save = async (rows: ScoreRow[]) => {
+    const { error } = await admin
+      .from("scores").upsert(rows, { onConflict: "job_id,resume_id" });
+    if (error) throw new Error(error.message);
+  };
+
+  try {
+    const report = await runScore({
+      resume, jobs, companies, ask, save,
+      budgetMs: BUDGET_MS, limit: LIMIT,
+    });
+    await admin.from("runs").insert({
+      kind: "score", ok: report.failed === 0, report,
+    });
+    return json({ ok: true, resume: resume.label, effort: EFFORT, ...report });
+  } catch (e) {
+    const err = e as Error;
+    await admin.from("runs").insert({
+      kind: "score", ok: false, report: { error: `${err.name}: ${err.message}` },
+    });
+    return json({ ok: false, error: `${err.name}: ${err.message}` }, 500);
+  }
+});
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body, null, 2), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}

@@ -157,6 +157,13 @@ body{
 }
 .actions select{background:var(--card);color:var(--ink)}
 .actions .nolink{align-self:center;font-size:13px;opacity:.7;font-style:italic}
+.machine{margin:18px 0 0;padding:10px 14px;border:1px solid var(--line);border-radius:8px;
+  font-size:13px;display:flex;gap:18px;flex-wrap:wrap;align-items:center}
+.machine .run{display:flex;gap:6px;align-items:center}
+.machine .dot{width:8px;height:8px;border-radius:50%;background:#999;flex:none}
+.machine .dot.ok{background:var(--stamp)}
+.machine .dot.bad{background:#b00020}
+.machine .never{opacity:.75;font-style:italic}
 
 .empty{padding:60px 20px;text-align:center;font-family:"IBM Plex Mono",monospace;
   font-size:13px;color:var(--ink-soft);background:var(--card);
@@ -187,6 +194,8 @@ body{
       <span id="stamp">not yet loaded</span>
     </div>
   </header>
+
+  <div class="machine" id="machine" hidden></div>
 
   <div class="counts" id="counts" hidden>
     <div><b id="c-apply">0</b><small>Apply</small></div>
@@ -225,12 +234,45 @@ async function load(){
       { headers:{ apikey:CFG.key, Authorization:`Bearer ${CFG.key}`, 'Accept-Profile':'jobscout' }});
     if(!r.ok) throw new Error(`${r.status} — check the key, and that the jobscout schema is exposed in API settings`);
     ROWS = await r.json();
-    $('#stamp').textContent = 'Run ' + new Date().toLocaleString();
+    $('#stamp').textContent = 'Loaded ' + new Date().toLocaleString();
     tally(); $('#counts').hidden = false; $('#filters').hidden = false;
     render();
+    await machineStatus();
   }catch(e){
     render([], e.message);
   }
+}
+
+// Principle 10: never show a green panel that implies a run happened. If the
+// crawler has never run, this says so — an empty panel that explains itself
+// beats a full one that lies.
+const KINDS = [['discover','ATS discovery'],['ingest','Crawl'],['score','Scoring']];
+
+async function machineStatus(){
+  const box = $('#machine');
+  box.hidden = false;
+  let runs = [];
+  try{
+    const r = await fetch(`${CFG.url}/rest/v1/v_last_runs?select=*`,
+      { headers:{ apikey:CFG.key, Authorization:`Bearer ${CFG.key}`, 'Accept-Profile':'jobscout' }});
+    if(!r.ok) throw new Error(`${r.status}`);
+    runs = await r.json();
+  }catch(e){
+    box.innerHTML = `<span class="never">Run history unavailable (${esc(e.message)}) — `
+      + `this panel cannot tell you whether the crawler is running.</span>`;
+    return;
+  }
+  const by = Object.fromEntries(runs.map(r => [r.kind, r]));
+  box.innerHTML = KINDS.map(([kind,label]) => {
+    const r = by[kind];
+    if(!r) return `<span class="run"><i class="dot"></i>${label}: `
+      + `<span class="never">never run</span></span>`;
+    const when = new Date(r.ran_at);
+    const age = Math.round((Date.now() - when) / 3600000);
+    const stale = age > 26 ? ' · stale' : '';
+    return `<span class="run"><i class="dot ${r.ok ? 'ok' : 'bad'}"></i>`
+      + `${label}: ${r.ok ? '' : 'FAILED '}${esc(when.toLocaleString())}${stale}</span>`;
+  }).join('');
 }
 
 function tally(){

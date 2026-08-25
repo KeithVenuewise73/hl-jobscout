@@ -1,114 +1,57 @@
-# JobScout — 24-hour runbook
+# JobScout
 
-Searches employer career sites directly. No LinkedIn, no Indeed.
+Searches employer career sites directly. No LinkedIn, no Indeed — each adapter
+talks to the applicant-tracking system the employer already runs.
 
-**Total hands-on time: about 4 hours.** The rest is the machine running.
-
----
-
-## Hour 0 — schema (10 min)
-
-1. Supabase → SQL Editor → paste `01_schema.sql` → Run.
-2. Settings → API → **Exposed schemas**: add `jobscout`. (The dashboard can't read it otherwise.)
-3. Grab your **Project URL**, **anon key**, and **service_role key**.
-
-```bash
-export SUPABASE_URL="https://xxxx.supabase.co"
-export SUPABASE_SERVICE_KEY="eyJ...service_role..."
-export ANTHROPIC_API_KEY="sk-ant-..."
-pip install -r requirements.txt
-```
-
-## Hour 1 — resolve the employer list (45 min, mostly unattended)
-
-`seed_companies.csv` has 59 WNY employers weighted toward your target profile.
-`discover.py` visits each careers page and figures out which ATS they run.
-
-```bash
-python discover.py --csv seed_companies.csv --out companies_resolved.csv
-```
-
-Expect roughly 15–25 of the 59 to land on an ATS with a JSON feed. That's the
-honest hit rate for this segment — small private employers largely don't use
-Greenhouse or Lever. The output CSV flags `supported=True/False` per company.
-
-Then load it into Supabase: Table Editor → `jobscout.companies` → Import CSV.
-Import all of them, supported or not — the unsupported ones are still your
-target list, they just need a bookmark instead of a crawler for now.
-
-## Hour 2 — first crawl (20 min)
-
-```bash
-python -m unittest         # 16 tests, no network, ~1s — run after any edit
-python ingest.py --dry-run    # sanity check
-python ingest.py              # write
-```
-
-If a company errors, the token is wrong. Fix it in the `companies` table and
-re-run — the upsert is idempotent, so re-running is always safe.
-
-Each run also closes postings that have disappeared from a board (`is_open` goes
-false), so the shortlist stops showing jobs that are already filled. That only
-happens for companies that fetched *and* wrote successfully — a timeout or a bad
-token leaves the existing postings alone rather than wiping the board.
-
-## Hour 3 — load your resume, then score (60 min)
-
-Insert your resume as plain text. SQL Editor:
-
-```sql
-insert into jobscout.resumes (label, content, comp_floor, dealbreakers)
-values (
-  'keith-ops-2026',
-  $$PASTE FULL RESUME TEXT HERE$$,
-  80000,
-  array['relocation required','75% travel','commission-only']
-);
-```
-
-Then:
-
-```bash
-python score.py --resume keith-ops-2026
-```
-
-Read the first 20 lines of output. If everything is scoring 70+, the model is
-being generous — tighten the `SYSTEM` prompt in `score.py`. If nothing clears
-55, loosen `TITLE_INCLUDE`. Getting this calibration right is the difference
-between a tool you use and a tool you stop opening.
-
-Scoring runs on `claude-opus-5`. Two knobs matter for cost:
-
-- `--effort low|medium|high|xhigh|max` (default `medium`) — how hard the model
-  thinks per posting.
-- The resume and the scoring instructions are sent as a cached prefix, identical
-  for every posting in a run, so you pay full price for them once and ~10% after
-  that. The run prints its own token accounting at the end; if the `cached`
-  number is 0, something is varying inside the prefix.
-
-`--limit` (default 250) caps how many postings reach the model in one run. When
-it bites, the run says so and how many it held back.
-
-## Hour 4 — dashboard
-
-Open `dashboard.html` in a browser, paste your project URL and **anon key**,
-click Load manifest. Click any row to see the fit reasoning and the cover-letter
-angle for that specific job. The status dropdown writes back to
-`jobscout.applications`.
-
-**Run it locally.** If you ever host it, put RLS policies on the `jobscout`
-tables first — the anon key is public by design.
-
-## Then: cron it
-
-```
-0 6,18 * * *  cd /path/to/jobscout && python ingest.py && python score.py --resume keith-ops-2026
-```
-
-Twice a day. Postings from small employers get filled fast; being in the first
-ten applicants matters more than the cover letter.
+Everything runs on Supabase, on a schedule. **Nothing runs on Keith's machine.**
+There is no terminal step in normal operation; the only thing he opens is
+`dashboard.html`.
 
 ---
+
+## How it runs
+
+```
+06:10 / 18:10 ET   jobscout-ingest    crawls employer boards -> jobscout.jobs
+06:30 / 18:30 ET   jobscout-score     scores new postings    -> jobscout.scores
+08:00 ET           jobscout-discover  resolves any unresolved company's ATS
+```
+
+Each is a Supabase Edge Function, fired by `pg_cron` via `jobscout.kick()`
+(see `supabase/migrations/0002_jobscout_schedule.sql`). Every run writes what it
+actually did to `jobscout.runs`, and the dashboard reads that back — so the
+status strip says "never run" when nothing has run, rather than showing an
+empty manifest that looks like "no matches today".
+
+## Layout
+
+| | |
+|---|---|
+| `supabase/migrations/0001_jobscout_schema.sql` | Tables, the `v_shortlist` view the dashboard reads, and the `runs` log |
+| `supabase/migrations/0002_jobscout_schedule.sql` | `pg_cron` + `pg_net` wiring. Separate migration because applying it is what turns the machine on |
+| `supabase/functions/_shared/` | Every decision lives here, with dependencies injected — this is what the tests exercise |
+| `supabase/functions/jobscout-*/` | Wiring only. Supabase in, shared core out; nothing here decides anything |
+| `dashboard.html` | The shortlist. Runs locally, reads with the anon key |
+| `seed_companies.csv` | 59 WNY employers weighted toward the target profile |
+
+The split is deliberate: the sandbox that builds this cannot reach jsr.io, npm,
+or any employer site, so anything that matters has to be provable without them.
+Cores are pure and injected; the edge functions are thin enough to read.
+
+## Tests
+
+```
+deno test supabase/functions/tests/
+```
+
+43 tests, no network, about a second. They cover the adapter field mapping
+against recorded ATS payloads, the stage-1 filters, the SSRF guard, and — the
+ones worth having — the ingest failure paths, because the close-stale step is
+the one that can destroy data if it fires on bad input.
+
+**What the tests do not cover:** whether the live boards still return the JSON
+these adapters expect. That needs a real crawl. A board that changes its shape
+breaks ingest and every test still passes.
 
 ## What's real vs. what's stubbed
 
@@ -117,24 +60,33 @@ ten applicants matters more than the cover letter.
 | Greenhouse / Lever / Ashby / SmartRecruiters | JSON feeds, no scraping — parsing unit-tested, not yet run against a live board |
 | Workday | Its own internal endpoint; slower, may need per-tenant tuning — parsing unit-tested, not yet run live |
 | iCIMS, Paylocity, ADP, Paycom, UKG, Taleo | **Detected but not ingested** — each needs an adapter |
-| Custom WordPress careers pages | Not attempted |
+| Custom careers pages with no ATS | Not attempted |
 
-**What has actually been run:** the adapter field-mapping, the stage-1 filters and
-the stale-close path are covered by `python -m unittest` (16 tests, no network).
-The ATS detection in `discover.py` and the adapters' behaviour against live
-boards have *not* been verified — that needs a machine with outbound access to
-employer sites, which is Hour 1 above. Expect to fix a token or two on the first
-real crawl.
+The unsupported tier is where most of the actual targets live. Two ways forward
+once the core is running:
 
-The unsupported tier is where most of your actual targets live. Two ways
-forward once the core is running:
+1. **Adapters.** Paylocity and JazzHR both have parseable JSON behind their job
+   list pages — each is maybe an hour. iCIMS and ADP are HTML scrapes.
+2. **Change-detection fallback.** For any careers page with no ATS at all, hash
+   the page text daily and alert on change. Crude, but it catches a new posting
+   at a 40-person family distributor the same day it goes up — which is exactly
+   the posting nobody else is seeing.
 
-1. **Adapters.** Paylocity and JazzHR both have parseable JSON behind their
-   job list pages — each is maybe an hour. iCIMS and ADP are HTML scrapes.
-2. **Change-detection fallback.** For any careers page with no ATS at all,
-   hash the page text daily and alert on change. Crude, but it catches a new
-   posting at a 40-person family distributor the same day it goes up, which
-   is exactly the posting nobody else is seeing.
+Option 2 is the one worth building next. It is simpler than the adapters and it
+covers the companies that matter most.
 
-Option 2 is the one worth building next. It's simpler than the adapters and
-it covers the companies that matter most to you.
+## Cost
+
+Scoring runs on `claude-opus-5`. The system prompt and the resume go as a
+cached prefix that is byte-identical for every posting in a run, so a
+250-posting run pays for the resume once and reads it from cache 249 times.
+`JOBSCOUT_SCORE_EFFORT` (default `medium`) is the other knob. Every run records
+its own token counts in `jobscout.runs` — if `cached` is 0, something is
+varying inside the prefix and the run is costing roughly ten times what it
+should.
+
+## Turning it off
+
+```sql
+select cron.unschedule('jobscout-ingest-am');   -- and the other four
+```

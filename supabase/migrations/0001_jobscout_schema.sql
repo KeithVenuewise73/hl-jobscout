@@ -25,6 +25,12 @@ create table if not exists jobscout.companies (
   priority      int  default 3,       -- 1 = chase hardest
   active        boolean default true,
   notes         text,
+  website       text,                 -- what discover.ts starts from
+  -- Crawl/discovery bookkeeping. Ordering by these is how a scheduled run
+  -- rotates through the whole list without a cursor it could lose.
+  last_crawled_at        timestamptz,
+  discover_attempted_at  timestamptz,
+  discover_evidence      text,
   created_at    timestamptz default now(),
   unique (name)
 );
@@ -50,7 +56,7 @@ create table if not exists jobscout.jobs (
 );
 
 create index if not exists jobs_open_idx on jobscout.jobs (is_open, last_seen desc);
-create index if not exists jobs_title_trgm on jobscout.jobs using gin (title gin_trgm_ops);
+create index if not exists jobs_title_trgm on jobscout.jobs using gin (title extensions.gin_trgm_ops);
 
 -- ---------- the resume(s) we match against ----------
 create table if not exists jobscout.resumes (
@@ -120,3 +126,23 @@ join jobscout.companies c  on c.id = j.company_id
 left join jobscout.applications a on a.job_id = j.id
 where j.is_open
 order by s.fit_score desc, j.first_seen desc;
+
+
+-- ---------- what each scheduled run actually did ----------
+-- Principle 10: the dashboard never invents a successful run. If a panel is
+-- empty it is because this table says nothing ran, and it says why.
+create table if not exists jobscout.runs (
+  id          bigserial primary key,
+  kind        text not null,          -- ingest | score | discover
+  ok          boolean not null,
+  report      jsonb not null,
+  ran_at      timestamptz default now()
+);
+
+create index if not exists runs_recent_idx on jobscout.runs (kind, ran_at desc);
+
+-- The last run of each kind, for the dashboard's status line.
+create or replace view jobscout.v_last_runs as
+select distinct on (kind) kind, ok, report, ran_at
+from jobscout.runs
+order by kind, ran_at desc;
