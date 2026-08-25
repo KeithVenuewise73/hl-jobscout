@@ -142,7 +142,13 @@ create table if not exists jobscout.runs (
 create index if not exists runs_recent_idx on jobscout.runs (kind, ran_at desc);
 
 -- The last run of each kind, for the dashboard's status line.
+--
+-- The `id desc` tie-break is load-bearing: ran_at defaults to now(), which is
+-- TRANSACTION time, so two rows written in one transaction share a timestamp
+-- and `distinct on` picks between them arbitrarily. Without it this view can
+-- show a green 'ok' for a kind whose latest run actually failed — which is the
+-- one thing this panel exists to prevent.
 create or replace view jobscout.v_last_runs as
 select distinct on (kind) kind, ok, report, ran_at
 from jobscout.runs
-order by kind, ran_at desc;
+order by kind, ran_at desc, id desc;

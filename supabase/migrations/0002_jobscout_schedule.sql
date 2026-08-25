@@ -44,7 +44,21 @@ begin
 end;
 $$;
 
-revoke all on function jobscout.kick(text) from public, anon, authenticated;
+-- kick() is SECURITY DEFINER and holds the service-role key, so nothing that
+-- reaches the API may call it. Revoking from PUBLIC is what actually does the
+-- work; anon/authenticated are revoked defensively but only if they exist, so
+-- this file still applies on a plain Postgres (a test database, a local stack).
+revoke all on function jobscout.kick(text) from public;
+
+do $$
+declare r text;
+begin
+  foreach r in array array['anon','authenticated','service_role'] loop
+    if exists (select 1 from pg_roles where rolname = r) then
+      execute format('revoke all on function jobscout.kick(text) from %I', r);
+    end if;
+  end loop;
+end $$;
 
 -- Crawl at 06:10 and 18:10 America/New_York. pg_cron runs in UTC, so that is
 -- 10:10 and 22:10 UTC during EDT. Scoring follows 20 minutes later, giving the
