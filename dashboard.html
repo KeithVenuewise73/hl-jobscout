@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JobScout — Manifest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Oswald:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#dce0d9;        /* carbonless copy, file-copy green */
+  --card:#fbfbf7;
+  --ink:#161a15;
+  --ink-soft:#4d5449;
+  --rule:#9aa396;
+  --rule-fine:#c3c9bd;
+  --canary:#efc53f;       /* driver copy */
+  --stamp:#a8342a;        /* received stamp */
+  --file:#7d9bb5;         /* file copy blue */
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,sans-serif;
+  font-size:15px;
+  line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1140px;margin:0 auto;padding:0 20px 80px}
+
+/* ---------- document header ---------- */
+.masthead{
+  border-bottom:2px solid var(--ink);
+  padding:26px 0 12px;
+  display:flex;flex-wrap:wrap;align-items:flex-end;gap:18px;
+}
+.mark{
+  font-family:"Oswald",sans-serif;
+  font-weight:600;
+  font-size:34px;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  line-height:1;
+}
+.mark span{color:var(--stamp)}
+.sub{
+  font-family:"IBM Plex Mono",monospace;
+  font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-soft);
+  margin-left:auto;text-align:right;
+}
+.counts{
+  display:flex;gap:0;border:1px solid var(--ink);
+  font-family:"IBM Plex Mono",monospace;margin:14px 0 0;
+  background:var(--card);
+}
+.counts div{padding:8px 16px;border-right:1px solid var(--rule-fine)}
+.counts div:last-child{border-right:0}
+.counts b{font-size:19px;font-weight:600;display:block;line-height:1.1}
+.counts small{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft)}
+
+/* ---------- config ---------- */
+.config{
+  margin:18px 0;padding:14px;border:1px dashed var(--rule);
+  background:var(--card);
+  display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+}
+.config input{
+  flex:1 1 260px;padding:8px 10px;border:1px solid var(--rule);
+  background:#fff;font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink);
+}
+.config button,.filters button{
+  font-family:"Oswald",sans-serif;letter-spacing:.1em;text-transform:uppercase;
+  font-size:12px;padding:9px 18px;border:1px solid var(--ink);
+  background:var(--ink);color:var(--paper);cursor:pointer;
+}
+.config button:hover{background:var(--stamp);border-color:var(--stamp)}
+
+/* ---------- filters ---------- */
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 6px;align-items:center}
+.filters button{background:transparent;color:var(--ink);border:1px solid var(--rule)}
+.filters button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.filters button:focus-visible,.config button:focus-visible,.row:focus-visible{
+  outline:2px solid var(--stamp);outline-offset:2px}
+
+/* ---------- manifest rows ---------- */
+.manifest{margin-top:14px;border-top:1px solid var(--ink)}
+.row{
+  display:grid;
+  grid-template-columns:62px 1fr auto;
+  gap:0 16px;
+  align-items:start;
+  background:var(--card);
+  border-bottom:1px solid var(--rule-fine);
+  padding:0;
+  cursor:pointer;
+}
+.row:hover{background:#fff}
+.score{
+  font-family:"Oswald",sans-serif;font-weight:600;font-size:24px;
+  text-align:center;padding:14px 0 0;
+  border-right:1px solid var(--rule-fine);
+  align-self:stretch;
+  position:relative;
+}
+.score em{
+  display:block;font-style:normal;font-family:"IBM Plex Mono",monospace;
+  font-size:9px;letter-spacing:.1em;color:var(--ink-soft);margin-top:2px}
+.score::after{
+  content:"";position:absolute;left:0;bottom:0;height:4px;
+  background:var(--canary);width:var(--bar,0%);
+}
+.tier-apply .score::after{background:var(--stamp)}
+.tier-maybe .score::after{background:var(--canary)}
+.tier-pass  .score::after{background:var(--file)}
+
+.body{padding:12px 0 13px}
+.title{font-weight:600;font-size:16px;line-height:1.25}
+.meta{
+  font-family:"IBM Plex Mono",monospace;font-size:11px;
+  letter-spacing:.05em;color:var(--ink-soft);margin-top:3px;
+  text-transform:uppercase;
+}
+.meta i{font-style:normal;color:var(--ink)}
+.side{padding:12px 16px 12px 0;text-align:right;white-space:nowrap}
+.verdict{
+  font-family:"Oswald",sans-serif;font-size:11px;letter-spacing:.16em;
+  text-transform:uppercase;border:1.5px solid currentColor;
+  padding:3px 9px;display:inline-block;transform:rotate(-1.5deg);
+}
+.tier-apply .verdict{color:var(--stamp)}
+.tier-maybe .verdict{color:#8a6d14}
+.tier-pass  .verdict{color:var(--ink-soft);border-style:dotted}
+
+/* ---------- expanded note ---------- */
+.note{
+  grid-column:2 / -1;
+  display:none;
+  border-top:1px dashed var(--rule);
+  margin:0 16px 16px 0;padding-top:12px;
+}
+.row.open .note{display:block}
+.note dl{margin:0;display:grid;grid-template-columns:110px 1fr;gap:7px 14px}
+.note dt{
+  font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-soft);padding-top:2px}
+.note dd{margin:0;font-size:14px}
+.note .angle{background:#fff8dd;padding:8px 10px;border-left:3px solid var(--canary)}
+.actions{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.actions a,.actions select{
+  font-family:"Oswald",sans-serif;font-size:12px;letter-spacing:.1em;
+  text-transform:uppercase;padding:8px 14px;border:1px solid var(--ink);
+  background:var(--ink);color:var(--paper);text-decoration:none;cursor:pointer;
+}
+.actions select{background:var(--card);color:var(--ink)}
+.actions .nolink{align-self:center;font-size:13px;opacity:.7;font-style:italic}
+
+.empty{padding:60px 20px;text-align:center;font-family:"IBM Plex Mono",monospace;
+  font-size:13px;color:var(--ink-soft);background:var(--card);
+  border-bottom:1px solid var(--rule-fine)}
+.empty b{display:block;font-family:"Oswald",sans-serif;font-size:18px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink);margin-bottom:8px}
+
+@media (max-width:640px){
+  .row{grid-template-columns:52px 1fr}
+  .side{grid-column:2;text-align:left;padding:0 0 12px}
+  .note{grid-column:1 / -1;margin-left:0}
+  .note dl{grid-template-columns:1fr}
+  .mark{font-size:26px}
+  .sub{margin-left:0;text-align:left;width:100%}
+}
+@media (prefers-reduced-motion:no-preference){
+  .row{transition:background .12s ease}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="mark">Job<span>Scout</span></div>
+    <div class="sub">
+      Direct-from-employer manifest<br>
+      <span id="stamp">not yet loaded</span>
+    </div>
+  </header>
+
+  <div class="counts" id="counts" hidden>
+    <div><b id="c-apply">0</b><small>Apply</small></div>
+    <div><b id="c-maybe">0</b><small>Maybe</small></div>
+    <div><b id="c-open">0</b><small>Open postings</small></div>
+    <div><b id="c-co">0</b><small>Employers</small></div>
+  </div>
+
+  <div class="config">
+    <input id="url" placeholder="https://yourproject.supabase.co" autocomplete="off">
+    <input id="key" placeholder="anon key" autocomplete="off">
+    <button id="load">Load manifest</button>
+  </div>
+
+  <div class="filters" id="filters" hidden>
+    <button data-f="apply" aria-pressed="true">Apply</button>
+    <button data-f="maybe" aria-pressed="true">Maybe</button>
+    <button data-f="pass" aria-pressed="false">Pass</button>
+    <button data-f="new" aria-pressed="false">Hide already applied</button>
+  </div>
+
+  <div class="manifest" id="manifest"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let ROWS = [], CFG = {};
+const state = { apply:true, maybe:true, pass:false, new:false };
+
+async function load(){
+  CFG = { url: $('#url').value.trim().replace(/\/$/,''), key: $('#key').value.trim() };
+  if(!CFG.url || !CFG.key){ render([], 'Enter your Supabase URL and anon key above.'); return; }
+  $('#manifest').innerHTML = '<div class="empty">Loading…</div>';
+  try{
+    const r = await fetch(`${CFG.url}/rest/v1/v_shortlist?select=*&order=fit_score.desc&limit=500`,
+      { headers:{ apikey:CFG.key, Authorization:`Bearer ${CFG.key}`, 'Accept-Profile':'jobscout' }});
+    if(!r.ok) throw new Error(`${r.status} — check the key, and that the jobscout schema is exposed in API settings`);
+    ROWS = await r.json();
+    $('#stamp').textContent = 'Run ' + new Date().toLocaleString();
+    tally(); $('#counts').hidden = false; $('#filters').hidden = false;
+    render();
+  }catch(e){
+    render([], e.message);
+  }
+}
+
+function tally(){
+  $('#c-apply').textContent = ROWS.filter(r=>r.verdict==='apply').length;
+  $('#c-maybe').textContent = ROWS.filter(r=>r.verdict==='maybe').length;
+  $('#c-open').textContent  = ROWS.length;
+  $('#c-co').textContent    = new Set(ROWS.map(r=>r.company)).size;
+}
+
+const esc = s => (s??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Posting URLs come from third-party career boards. Only http(s) gets to be a
+// link; anything else (javascript:, data:) renders inert.
+const safeUrl = u => /^https?:\/\//i.test(u ?? '') ? esc(u) : '';
+
+function render(list, msg){
+  const box = $('#manifest');
+  if(msg){ box.innerHTML = `<div class="empty"><b>Nothing loaded</b>${esc(msg)}</div>`; return; }
+  const rows = (list ?? ROWS).filter(r =>
+      state[r.verdict] && (!state.new || r.status === 'new'));
+  if(!rows.length){
+    box.innerHTML = `<div class="empty"><b>Empty manifest</b>No postings match the current filters.</div>`;
+    return;
+  }
+  box.innerHTML = rows.map(r => `
+    <article class="row tier-${esc(r.verdict)}" tabindex="0" data-id="${r.job_id}">
+      <div class="score" style="--bar:${Math.max(0,Math.min(100,r.fit_score))}%">
+        ${r.fit_score}<em>fit</em>
+      </div>
+      <div class="body">
+        <div class="title">${esc(r.title)}</div>
+        <div class="meta">
+          <i>${esc(r.company)}</i> · ${esc(r.location || r.city || 'location not stated')}
+          ${r.owner_type ? ' · ' + esc(r.owner_type) : ''}
+          ${r.comp_text ? ' · ' + esc(r.comp_text) : ''}
+          ${r.status !== 'new' ? ' · ' + esc(r.status).toUpperCase() : ''}
+        </div>
+      </div>
+      <div class="side"><span class="verdict">${esc(r.verdict)}</span></div>
+      <div class="note">
+        <dl>
+          <dt>Why it fits</dt><dd>${esc(r.why_fits)}</dd>
+          <dt>The risk</dt><dd>${esc(r.why_not)}</dd>
+          ${r.resume_angle ? `<dt>Lead with</dt><dd class="angle">${esc(r.resume_angle)}</dd>` : ''}
+        </dl>
+        <div class="actions">
+          ${safeUrl(r.url)
+            ? `<a href="${safeUrl(r.url)}" target="_blank" rel="noopener">Open posting</a>`
+            : `<span class="nolink">No usable link — search the employer's careers page</span>`}
+          <select data-job="${r.job_id}" data-saved="${esc(r.status)}">
+            ${['new','shortlisted','applied','screening','interview','offer','rejected']
+              .map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    </article>`).join('');
+}
+
+$('#load').addEventListener('click', load);
+$('#filters').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  const on = b.getAttribute('aria-pressed') === 'true';
+  b.setAttribute('aria-pressed', String(!on));
+  state[b.dataset.f] = !on;
+  render();
+});
+$('#manifest').addEventListener('click', e => {
+  if(e.target.closest('a,select')) return;
+  const row = e.target.closest('.row'); if(row) row.classList.toggle('open');
+});
+$('#manifest').addEventListener('keydown', e => {
+  if(e.key === 'Enter' && e.target.classList.contains('row')) e.target.classList.toggle('open');
+});
+$('#manifest').addEventListener('change', async e => {
+  const sel = e.target.closest('select[data-job]'); if(!sel) return;
+  const prev = sel.dataset.saved ?? '';
+  sel.disabled = true;
+  try{
+    const r = await fetch(`${CFG.url}/rest/v1/applications?on_conflict=job_id`, {
+      method:'POST',
+      headers:{ apikey:CFG.key, Authorization:`Bearer ${CFG.key}`,
+                'Content-Type':'application/json', 'Content-Profile':'jobscout',
+                Prefer:'resolution=merge-duplicates' },
+      body: JSON.stringify({ job_id:Number(sel.dataset.job), status:sel.value,
+                             applied_at: sel.value==='applied' ? new Date().toISOString() : null })
+    });
+    if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    // Only claim it saved once the write came back OK.
+    sel.dataset.saved = sel.value;
+    sel.style.borderColor = 'var(--stamp)';
+    sel.title = '';
+  }catch(err){
+    sel.style.borderColor = '#b00020';
+    sel.title = `Not saved: ${err.message}`;
+    if(prev) sel.value = prev;
+    alert(`Status not saved — the row still reads "${prev || sel.value}".\n\n${err.message}`);
+  }finally{
+    sel.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
