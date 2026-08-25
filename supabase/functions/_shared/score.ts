@@ -7,8 +7,6 @@
 // The model call is INJECTED (`ask`), so calibration, batching, cost accounting
 // and the schema contract are all testable without spending a token.
 
-import { locationOk, titleOk } from "./filters.ts";
-
 export const MODEL = "claude-opus-5";
 
 export interface Resume {
@@ -143,11 +141,6 @@ export function postingBlock(job: Job, co: Company): string {
   ].join("\n");
 }
 
-/** Stage 1. Free, and the reason the model bill stays small. */
-export function eligible(jobs: Job[]): Job[] {
-  return jobs.filter((j) => titleOk(j.title) && locationOk(j.location));
-}
-
 export interface ScoreRow extends Verdict {
   job_id: number;
   resume_id: number;
@@ -157,7 +150,6 @@ export interface ScoreRow extends Verdict {
 export interface ScoreReport {
   scored: number;
   failed: number;
-  filtered_out_free: number;
   held_back_by_budget: number;
   usage: Usage;
   failures: { job_id: number; title: string; error: string }[];
@@ -182,8 +174,10 @@ export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
   const saveEvery = deps.saveEvery ?? 10;
   const started = now();
 
-  const survivors = eligible(deps.jobs);
-  const queue = survivors.slice(0, limit);
+  // The caller decides what deserves scoring. Stage-1 filtering lives in
+  // filters.ts and runs at WRITE time, which keeps the geo gazetteer — 130KB+
+  // of postal data — out of this function's deploy bundle entirely.
+  const queue = deps.jobs.slice(0, limit);
   const prefix = resumePrefix(deps.resume);
 
   const usage: Usage = { input: 0, cached: 0, output: 0 };
@@ -220,8 +214,7 @@ export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
   return {
     scored,
     failed: failures.length,
-    filtered_out_free: deps.jobs.length - survivors.length,
-    held_back_by_budget: queue.length - processed + (survivors.length - queue.length),
+    held_back_by_budget: (queue.length - processed) + (deps.jobs.length - queue.length),
     usage,
     failures,
   };

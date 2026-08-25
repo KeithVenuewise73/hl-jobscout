@@ -118,3 +118,24 @@ export function locationOk(
 ): boolean {
   return withinRadius(loc, radiusMiles).ok;
 }
+
+export interface FilterableJob {
+  title: string;
+  location?: string | null;
+}
+
+/**
+ * Stage 1: the free filters, applied before a single token is spent.
+ *
+ * This lives with the filters rather than in the scorer on purpose. Scoring
+ * runs as an edge function, and importing this pulled in geo.ts and its
+ * generated 130KB+ postal gazetteer — a lot of deploy weight, and a lot of
+ * cold-start parsing, for a decision better made once when a posting is
+ * written than repeatedly when it is scored.
+ */
+export function eligible<T extends FilterableJob>(
+  jobs: T[],
+  radiusMiles = DEFAULT_RADIUS_MILES,
+): T[] {
+  return jobs.filter((j) => titleOk(j.title) && locationOk(j.location, radiusMiles));
+}

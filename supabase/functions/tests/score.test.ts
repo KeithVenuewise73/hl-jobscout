@@ -1,8 +1,9 @@
 import { assertEquals, assertStringIncludes, assertTrue } from "./assert.ts";
 import {
-  eligible, postingBlock, resumePrefix, runScore, type Ask, type Job, type Resume,
+  postingBlock, resumePrefix, runScore, type Ask, type Job, type Resume,
   type ScoreRow,
 } from "../_shared/score.ts";
+import { eligible } from "../_shared/filters.ts";
 
 const RESUME: Resume = {
   id: 1, label: "keith-ops-2026", content: "20 years running distribution.",
@@ -56,15 +57,15 @@ Deno.test("stage 1 runs before any model call", () => {
   assertEquals(eligible(jobs).map((j) => j.id), [1]);
 });
 
-Deno.test("scores the survivors and accumulates real token usage", async () => {
+Deno.test("scores what it is given and accumulates real token usage", async () => {
   const saved: ScoreRow[][] = [];
+  // The caller filters; runScore scores. eligible() is tested separately.
   const r = await runScore({
     resume: RESUME, companies: CO, ask: okAsk,
-    jobs: [job(1, "Operations Manager"), job(2, "Warehouse Associate")],
+    jobs: eligible([job(1, "Operations Manager"), job(2, "Warehouse Associate")]),
     save: (rows) => { saved.push(rows); return Promise.resolve(); },
   });
   assertEquals(r.scored, 1);
-  assertEquals(r.filtered_out_free, 1);
   assertEquals(r.usage, { input: 500, cached: 3000, output: 120 });
   assertEquals(saved.flat().length, 1);
   assertEquals(saved.flat()[0].job_id, 1);
