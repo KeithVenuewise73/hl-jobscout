@@ -11,18 +11,44 @@
 // cursor to lose.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { authorize, type TokenStore } from "../_shared/auth.ts";
 import { ADAPTERS, type Company } from "../_shared/adapters.ts";
 import { makeClient } from "../_shared/http.ts";
 import { runIngest, type Db, type JobRow } from "../_shared/ingest.ts";
 
 const BUDGET_MS = Number(Deno.env.get("JOBSCOUT_INGEST_BUDGET_MS") ?? 120_000);
 
-Deno.serve(async () => {
+// The expected run token, read over the service-role connection. Absent until
+// the schedule migration is applied, which is what arms the check.
+const tokenStore = (admin: {
+  from: (t: string) => {
+    select: (c: string) => { limit: (n: number) => Promise<{ data: unknown; error: unknown }> };
+  };
+}): TokenStore => ({
+  async expected() {
+    const { data, error } = await admin.from("runtime").select("cron_token").limit(1);
+    // A missing table means the migration has not been applied yet, which is
+    // "not configured", not "broken".
+    if (error) {
+      const msg = String((error as { message?: string }).message ?? error);
+      if (/does not exist|schema cache|relation/i.test(msg)) return null;
+      throw new Error(msg);
+    }
+    const rows = data as { cron_token?: string }[] | null;
+    return rows?.[0]?.cron_token ?? null;
+  },
+});
+
+Deno.serve(async (req) => {
   const admin = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     { db: { schema: "jobscout" } },
   );
+
+  // A valid JWT is necessary and not sufficient: the anon key is public.
+  const auth = await authorize(req, tokenStore(admin));
+  if (!auth.ok) return json({ ok: false, error: auth.reason }, 401);
 
   const db: Db = {
     async dueCompanies(limit) {
