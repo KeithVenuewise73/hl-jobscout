@@ -168,3 +168,37 @@ Deno.test("JSON-LD still wins over main-content extraction", () => {
   assertTrue(r.description!.includes("The real posting body"));
   assertTrue(!r.description!.includes("Some other page text"));
 });
+
+Deno.test("a bare small dollar figure is not mistaken for a salary", () => {
+  // Regression, and an expensive one. The loose pattern pulled "$30" off a
+  // university careers page and wrote it as the posting's pay. The scorer caps
+  // a job at 25 when stated pay is below the floor, so a stray "$30" turns a
+  // real Director role into a rejection without anyone seeing why.
+  const mk = (s: string) =>
+    `<script type="application/ld+json">{"@type":"JobPosting","description":"${s} ${"z".repeat(200)}"}</script>`;
+  for (const junk of [
+    "Call extension $30 for details.",
+    "A $25 application fee applies.",
+    "Parking is $8 daily.",
+  ]) {
+    assertEquals(extract(mk(junk)).comp_text, null, junk);
+  }
+});
+
+Deno.test("a small figure that names its unit is a salary", () => {
+  // "$30 per hour" is real pay and must survive the plausibility gate.
+  const mk = (s: string) =>
+    `<script type="application/ld+json">{"@type":"JobPosting","description":"${s} ${"z".repeat(200)}"}</script>`;
+  assertTrue((extract(mk("Pay is $30 per hour.")).comp_text ?? "").includes("30"));
+  assertTrue((extract(mk("Rate: $28.50/hr")).comp_text ?? "").includes("28.50"));
+  assertTrue((extract(mk("Range $22 to $30 an hour")).comp_text ?? "").includes("22"));
+});
+
+Deno.test("full salary figures still parse", () => {
+  const mk = (s: string) =>
+    `<script type="application/ld+json">{"@type":"JobPosting","description":"${s} ${"z".repeat(200)}"}</script>`;
+  assertEquals(extract(mk("Salary $100,000 - $150,000 per year.")).comp_text,
+    "$100,000 - $150,000 per year");
+  assertEquals(extract(mk("Range is $75K-$95K a year.")).comp_text, "$75K-$95K a year");
+  assertTrue((extract(mk("Starting at $105,000.")).comp_text ?? "").includes("105,000"));
+});

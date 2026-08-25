@@ -94,9 +94,31 @@ export const clean = (s: string) =>
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-/** Money as an employer writes it: "$100,000 - $150,000", "$75K-$95K a year". */
-const PAY_LINE =
-  /\$\s?\d[\d,.]*\s?[kK]?(?:\s*(?:-|–|to)\s*\$?\s?\d[\d,.]*\s?[kK]?)?(?:\s*(?:per|\/|a)\s*(?:year|yr|hour|hr|annum))?/;
+/**
+ * Money as an employer writes it: "$100,000 - $150,000", "$75K-$95K a year".
+ *
+ * Every part of this is a plausibility gate, and it is here because the loose
+ * version wrote "$30" into a posting's pay field off a university careers page
+ * — where it came from a phone extension, a fee, anything. That is not a
+ * cosmetic error: the scorer is told to cap a job at 25 when stated pay is
+ * below the floor, so a stray "$30" silently converts a real Director role
+ * into a rejection.
+ *
+ * A number only counts as pay when it says so:
+ *   - four figures or more ($1,000+), or
+ *   - a K/M suffix ($95K), or
+ *   - an explicit unit ("$30 per hour", "$30/hr").
+ * A bare "$30" matches none of these and is ignored.
+ */
+const AMOUNT = String.raw`\$\s?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?\s?[kKmM]|\d{4,}(?:\.\d+)?)`;
+const UNIT = String.raw`\s*(?:per\s+|\/|an?\s+)(?:year|yr|hour|hr|annum|month|week)`;
+const SMALL = String.raw`\$\s?\d{1,3}(?:\.\d+)?`;
+const PAY_LINE = new RegExp(
+  // a qualifying amount, optionally ranged, optionally with a unit
+  `(?:${AMOUNT}(?:\\s*(?:-|–|to)\\s*(?:${AMOUNT}|\\$?\\s?\\d[\\d,.]*\\s?[kKmM]?))?(?:${UNIT})?` +
+    // or a small number that EARNS it by naming its unit ("$30 per hour")
+    `|${SMALL}(?:\\s*(?:-|–|to)\\s*${SMALL})?${UNIT})`,
+);
 
 function fromBaseSalary(node: unknown): string | null {
   if (!node || typeof node !== "object") return null;
