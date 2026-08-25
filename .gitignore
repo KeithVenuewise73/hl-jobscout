@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .env
 companies_resolved.csv
+
+# The resume lives in the database, never in the repo.
+resume*.txt
+*resume*.sql

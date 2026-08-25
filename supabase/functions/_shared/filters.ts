@@ -6,6 +6,10 @@
 // title *ending* in "Associate" — so every warehouse-associate posting reached
 // the model despite a filter existing to stop exactly that.
 
+import { DEFAULT_RADIUS_MILES, withinRadius } from "./geo.ts";
+
+export { DEFAULT_RADIUS_MILES, withinRadius };
+
 // Matched with a left word boundary only, so "operation" also catches
 // "Operational Excellence". Tuned against Keith's actual career: the titles he
 // has held (Market Manager at CRST, Operations Manager - Last Mile at RXO,
@@ -42,15 +46,6 @@ export const TITLE_EXCLUDE = [
   "entry level", "apprentice", "co-op",
 ];
 
-// Buffalo/WNY commutable, plus remote.
-export const LOCATION_OK = [
-  "buffalo", "amherst", "cheektowaga", "tonawanda", "lancaster", "depew",
-  "west seneca", "hamburg", "orchard park", "lackawanna", "niagara",
-  "lockport", "batavia", "rochester", "olean", "jamestown", "dunkirk",
-  "fredonia", "wny", "western new york", "remote", "erie county",
-  "new york", " ny", "ny,", "ny ",
-];
-
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const EXCLUDE_RE = new RegExp(`\\b(?:${TITLE_EXCLUDE.map(esc).join("|")})\\b`, "i");
@@ -65,9 +60,16 @@ export function titleOk(t: string | null | undefined): boolean {
   return INCLUDE_RE.test(s) || INCLUDE_EXACT_RE.test(s);
 }
 
-export function locationOk(loc: string | null | undefined): boolean {
-  // Unknown location is not a reason to spend nothing — let the model see it.
-  if (!loc) return true;
-  const l = loc.toLowerCase();
-  return LOCATION_OK.some((x) => l.includes(x));
+/**
+ * Radius gate. Delegates to geo.ts, which measures real distance from Buffalo.
+ *
+ * The list this replaced contained "new york", " ny" and "ny," — so every
+ * posting in the state passed, Brooklyn and Yonkers included. It was a filter
+ * that filtered nothing.
+ */
+export function locationOk(
+  loc: string | null | undefined,
+  radiusMiles = DEFAULT_RADIUS_MILES,
+): boolean {
+  return withinRadius(loc, radiusMiles).ok;
 }

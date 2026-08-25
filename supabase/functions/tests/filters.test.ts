@@ -72,11 +72,16 @@ Deno.test("short include terms are bounded on both sides", () => {
   assertEquals(titleOk("VPN Support Engineer"), false);
 });
 
-Deno.test("locationOk — WNY and remote pass, elsewhere does not", () => {
+Deno.test("locationOk — now a real 50-mile radius, not a substring list", () => {
   for (const l of ["Buffalo, NY", "Remote", "Amherst", "Western New York"]) {
     assertEquals(locationOk(l), true, l);
   }
   for (const l of ["Dallas, TX", "Chicago, IL"]) {
+    assertEquals(locationOk(l), false, l);
+  }
+  // These used to pass. The old list contained "new york" and " ny", so the
+  // gate admitted the entire state.
+  for (const l of ["Brooklyn, NY", "Albany, NY", "Rochester, NY"]) {
     assertEquals(locationOk(l), false, l);
   }
 });
