@@ -250,6 +250,10 @@ Deno.test("the scorer is told that a distant address on a territory role is not 
   assertStringIncludes(SYSTEM, "LOCATION-INDEPENDENT");
   assertStringIncludes(SYSTEM, "TERRITORY, not a commute");
   assertStringIncludes(SYSTEM, "Heavy travel is acceptable");
+  // Deduplication hands the model one posting carrying every location the job
+  // was found in. Without this line it has no instruction on what to do with a
+  // list, and may average them or take the first.
+  assertStringIncludes(SYSTEM, "judge it on the BEST one for him");
 });
 
 Deno.test("one job posted five times buys one model call, not five", () => {

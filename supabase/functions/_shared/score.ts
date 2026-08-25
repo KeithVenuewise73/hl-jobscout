@@ -94,6 +94,8 @@ Between floor and band, it is workable but say so in why_not. Judge only pay the
   why_not only when the posting genuinely demands relocation or on-site
   presence he cannot give from Buffalo. Heavy travel is acceptable; note the
   amount if the posting states it.
+  When LOCATION lists SEVERAL places, the same job is open at each of them:
+  judge it on the BEST one for him and name that one in why_fits.
 - If the posting has no description, score on title and employer only and cap at 55.
 
 why_not is the real risk or gap, not a hedge. resume_angle is the specific
