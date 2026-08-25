@@ -72,6 +72,24 @@ Deno.test("short include terms are bounded on both sides", () => {
   assertEquals(titleOk("VPN Support Engineer"), false);
 });
 
+Deno.test("a title must name a LEVEL, not just a function", () => {
+  // The include list carries broad function words that are right inside a
+  // manager title and wrong alone. A real Indeed digest of eleven
+  // "distribution jobs" was eleven floor roles at $17-25/hour; these three
+  // reached the model on the function word alone before this rule existed.
+  for (const t of ["WAREHOUSE OPERATIONS", "Shipping and Receiving",
+                   "Logistics Customer Service Representative $45,000 year",
+                   "Warehouse 1st shift", "Load Operator",
+                   "Packaging Material Handler", "Stockroom Team Leader"]) {
+    assertEquals(titleOk(t), false, t);
+  }
+  // ...and the same function words still pass WITH a level word attached.
+  for (const t of ["Warehouse Manager", "Shipping Supervisor",
+                   "Director of Logistics", "Plant Superintendent"]) {
+    assertEquals(titleOk(t), true, t);
+  }
+});
+
 Deno.test("target level: Sr Manager / Director and up survive", () => {
   for (const t of ["Senior Manager, Logistics", "Sr Manager Distribution",
                    "Director of Operations", "Head of Distribution - North America",

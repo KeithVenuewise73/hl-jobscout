@@ -69,28 +69,45 @@ const clean = (s: string) => s.replace(/\s+/g, " ").trim();
  */
 export function parseIndeedAlert(body: string): AlertPosting[] {
   const out: AlertPosting[] = [];
-  // Every posting ends at its Indeed link; split there and read backwards.
+  const LINK = /^https:\/\/www\.indeed\.com\/(?:rc\/clk|pagead\/clk)/;
+
+  // Each posting ENDS at its Indeed link, so splitting there puts one posting
+  // at the tail of each block, paired with the link that follows it.
   const blocks = body.split(/\n(?=https:\/\/www\.indeed\.com\/(?:rc\/clk|pagead\/clk))/);
 
   for (let i = 0; i < blocks.length - 1; i++) {
     const url = (blocks[i + 1].match(/^(https:\/\/www\.indeed\.com\/\S+)/) ?? [])[1] ?? null;
-    const lines = blocks[i].split("\n").map(clean).filter(Boolean);
 
-    // Walk back to the "Company - Location" line; the title sits above it.
-    let coIdx = -1;
-    for (let j = lines.length - 1; j >= 1; j--) {
-      if (/ - /.test(lines[j]) && !PAY.test(lines[j]) && !RECENCY.test(lines[j])) {
-        coIdx = j;
-        break;
-      }
-    }
-    if (coIdx < 1) continue;
+    let lines = blocks[i].split("\n").map(clean).filter(Boolean);
+    // Drop the previous posting's link, which leads every block after the first.
+    if (lines.length && LINK.test(lines[0])) lines = lines.slice(1);
+    // The first block is preceded by the digest header. Strip it by its
+    // trailing "See matching results" line where present, and defensively by
+    // shape where it is not — a header read as a posting both invents a job
+    // and swallows the real first one.
+    const hdr = lines.findIndex((l) => /^See matching results on Indeed:/i.test(l));
+    if (hdr >= 0) lines = lines.slice(hdr + 1);
+    while (
+      lines.length &&
+      /^(indeed job alert|jobs \d+-\d+ of |\d+ new .*\bjobs?\b.* in )/i.test(lines[0])
+    ) lines = lines.slice(1);
+    if (lines.length < 2) continue;
 
-    const title = lines[coIdx - 1];
-    if (!title || title.length > 200) continue;
-    const [company, ...locParts] = lines[coIdx].split(" - ");
-    const rest = lines.slice(coIdx + 1);
+    // Read FORWARD from the top of the posting. Scanning backwards for the
+    // "Company - Location" line looked reasonable and was wrong: descriptions
+    // contain hyphens too ("(4:00 PM - 12:00 AM)", "Williamsville, NY - ..."),
+    // so the scan landed in the snippet and read the badge line above it
+    // ("Easily apply") as the job title.
+    const title = lines[0];
+    const coLine = lines[1];
+    if (!title || title.length > 200 || BADGE.test(title) || PAY.test(title)) continue;
+    if (!coLine || BADGE.test(coLine)) continue;
 
+    const dash = coLine.indexOf(" - ");
+    const company = dash >= 0 ? coLine.slice(0, dash) : coLine;
+    const location = dash >= 0 ? coLine.slice(dash + 3) : null;
+
+    const rest = lines.slice(2);
     const comp = rest.find((l) => PAY.test(l)) ?? null;
     const posted = rest.find((l) => RECENCY.test(l)) ?? null;
     const snippet = rest.find(
@@ -99,10 +116,10 @@ export function parseIndeedAlert(body: string): AlertPosting[] {
 
     out.push({
       source: "indeed",
-      ats_job_id: stableId("in", title, company, locParts.join(" - ")),
+      ats_job_id: stableId("in", title, company, location),
       title,
       company: clean(company),
-      location: locParts.length ? clean(locParts.join(" - ")) : null,
+      location: location ? clean(location) : null,
       // Indeed's own footer: "Salaries estimated if unavailable." The scorer is
       // told to judge only STATED pay, so the provenance travels with the value.
       comp_text: comp ? `${comp} (per Indeed listing; may be an Indeed estimate)` : null,
