@@ -59,7 +59,6 @@ Deno.serve(async () => {
   }
   const resume = resumes[0] as Resume;
 
-  // Postings this resume has not been scored against yet.
   // Already-scored postings, WITH their verdicts: a copy of a job already
   // judged inherits that verdict instead of buying another call.
   const { data: scored } = await admin
