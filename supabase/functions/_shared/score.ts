@@ -7,6 +7,8 @@
 // The model call is INJECTED (`ask`), so calibration, batching, cost accounting
 // and the schema contract are all testable without spending a token.
 
+import { groupDuplicates, mergedLocation, representative } from "./dedupe.ts";
+
 export const MODEL = "claude-opus-5";
 
 export interface Resume {
@@ -178,6 +180,8 @@ export interface ScoreReport {
   held_back_by_budget: number;
   usage: Usage;
   failures: { job_id: number; title: string; error: string }[];
+  /** Copies that inherited a verdict instead of buying their own model call. */
+  duplicates_collapsed: number;
   /** Set when the run stopped early because the failures were systemic. */
   aborted?: string;
 }
@@ -207,7 +211,11 @@ export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
   // The caller decides what deserves scoring. Stage-1 filtering lives in
   // filters.ts and runs at WRITE time, which keeps the geo gazetteer — 130KB+
   // of postal data — out of this function's deploy bundle entirely.
-  const queue = deps.jobs.slice(0, limit);
+  // One job posted five times is one job. Group first, then take `limit` from
+  // the GROUPS — otherwise a single employer's multi-store listing eats the
+  // whole budget and everything behind it waits for the next run.
+  const groups = groupDuplicates(deps.jobs).slice(0, limit);
+  const collapsed = groups.reduce((n, g) => n + g.length - 1, 0);
   const prefix = resumePrefix(deps.resume);
 
   const usage: Usage = { input: 0, cached: 0, output: 0 };
@@ -224,23 +232,35 @@ export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
     batch = [];
   };
 
-  for (const j of queue) {
+  for (const group of groups) {
     if (now() - started > budgetMs) break;
     processed++;
+    const j = representative(group);
     const co = deps.companies.get(j.company_id) ?? { name: "?" };
+    // The posting the model sees carries EVERY location in the group. Judging
+    // one copy and copying its verdict would settle the question on whichever
+    // row happened to be picked — and a Buffalo-commutable job whose Colorado
+    // copy won the toss reads as a relocation.
+    const merged: Job = { ...j, location: mergedLocation(group) };
     try {
-      const { verdict, usage: u } = await deps.ask(prefix, postingBlock(j, co));
+      const { verdict, usage: u } = await deps.ask(prefix, postingBlock(merged, co));
       usage.input += u.input;
       usage.cached += u.cached;
       usage.output += u.output;
-      batch.push({
-        ...verdict,
-        fit_score: clampScore(verdict.fit_score),
-        job_id: j.id,
-        resume_id: deps.resume.id,
-        model: MODEL,
-      });
-      scored++;
+      const fit = clampScore(verdict.fit_score);
+      // Every copy gets the verdict. They are the same job; leaving the others
+      // unscored would send them back through the queue on the next run to be
+      // paid for again.
+      for (const member of group) {
+        batch.push({
+          ...verdict,
+          fit_score: fit,
+          job_id: member.id,
+          resume_id: deps.resume.id,
+          model: MODEL,
+        });
+      }
+      scored += group.length;
       inARow = 0;
       if (batch.length >= saveEvery) await flush();
     } catch (e) {
@@ -272,7 +292,8 @@ export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
   return {
     scored,
     failed: failures.length,
-    held_back_by_budget: (queue.length - processed) + (deps.jobs.length - queue.length),
+    held_back_by_budget: groups.slice(processed).reduce((n, g) => n + g.length, 0),
+    duplicates_collapsed: collapsed,
     usage,
     failures,
     ...(aborted ? { aborted } : {}),

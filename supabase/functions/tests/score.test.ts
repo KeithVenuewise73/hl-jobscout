@@ -96,7 +96,9 @@ Deno.test("partial results are flushed as it goes, not held to the end", async (
   const saved: ScoreRow[][] = [];
   await runScore({
     resume: RESUME, companies: CO, ask: okAsk,
-    jobs: Array.from({ length: 5 }, (_, i) => job(i + 1, "Operations Manager")),
+    // Distinct titles: five copies of one title at one employer are one job
+    // now, and this test is about flushing, not about deduplication.
+    jobs: Array.from({ length: 5 }, (_, i) => job(i + 1, `Operations Manager ${i}`)),
     saveEvery: 2,
     save: (rows) => { saved.push([...rows]); return Promise.resolve(); },
   });
@@ -108,7 +110,7 @@ Deno.test("the wall-clock budget stops the run cleanly", async () => {
   let t = 0;
   const r = await runScore({
     resume: RESUME, companies: CO, ask: okAsk,
-    jobs: Array.from({ length: 10 }, (_, i) => job(i + 1, "Operations Manager")),
+    jobs: Array.from({ length: 10 }, (_, i) => job(i + 1, `Operations Manager ${i}`)),
     budgetMs: 100,
     now: () => (t += 60),
     save: () => Promise.resolve(),
@@ -248,4 +250,89 @@ Deno.test("the scorer is told that a distant address on a territory role is not 
   assertStringIncludes(SYSTEM, "LOCATION-INDEPENDENT");
   assertStringIncludes(SYSTEM, "TERRITORY, not a commute");
   assertStringIncludes(SYSTEM, "Heavy travel is acceptable");
+});
+
+Deno.test("one job posted five times buys one model call, not five", () => {
+  // The Tile Shop's "Warehouse Manager" ran to six rows across five stores and
+  // was scored six times. Every copy is a model call and a duplicate line on
+  // the shortlist for a job already judged.
+  return (async () => {
+    let calls = 0;
+    const saved: ScoreRow[] = [];
+    const report = await runScore({
+      resume: RESUME,
+      companies: CO,
+      jobs: [
+        job(1, "Warehouse Manager", "Littleton, CO"),
+        job(2, "Warehouse Manager", "Cheektowaga, NY"),
+        job(3, "Warehouse Manager", "Avon, MA"),
+        job(4, "Operations Director", "Buffalo, NY"),
+      ],
+      ask: (_p, posting) => {
+        calls++;
+        // Every location reaches the model in ONE posting, so it can see that
+        // one of the stores is in range.
+        assertStringIncludes(posting, "LOCATION:");
+        return Promise.resolve({ verdict: VERDICT, usage: { input: 1, cached: 0, output: 1 } });
+      },
+      save: (rows) => {
+        saved.push(...rows);
+        return Promise.resolve();
+      },
+    });
+
+    assertEquals(calls, 2);                    // two real jobs, two calls
+    assertEquals(report.duplicates_collapsed, 2);
+    // Every copy still gets a score, so none returns to the queue next run.
+    assertEquals(saved.length, 4);
+    assertEquals(saved.map((r) => r.job_id).sort(), [1, 2, 3, 4]);
+    assertEquals(new Set(saved.map((r) => r.fit_score)).size, 1);
+  })();
+});
+
+Deno.test("the grouped posting names every location it was found in", () => {
+  return (async () => {
+    let seen = "";
+    await runScore({
+      resume: RESUME,
+      companies: CO,
+      jobs: [
+        job(1, "Warehouse Manager", "Littleton, CO"),
+        job(2, "Warehouse Manager", "Cheektowaga, NY"),
+      ],
+      ask: (_p, posting) => {
+        seen = posting;
+        return Promise.resolve({ verdict: VERDICT, usage: { input: 1, cached: 0, output: 1 } });
+      },
+      save: () => Promise.resolve(),
+    });
+    assertStringIncludes(seen, "Cheektowaga, NY");
+    assertStringIncludes(seen, "Littleton, CO");
+    assertStringIncludes(seen, "(2 locations)");
+  })();
+});
+
+Deno.test("the limit counts JOBS, not copies", () => {
+  // Taking `limit` from the raw rows would let one employer's multi-store
+  // listing eat the whole budget while real jobs behind it wait a full run.
+  return (async () => {
+    let calls = 0;
+    const report = await runScore({
+      resume: RESUME,
+      companies: CO,
+      jobs: [
+        job(1, "Warehouse Manager", "A"), job(2, "Warehouse Manager", "B"),
+        job(3, "Warehouse Manager", "C"), job(4, "Warehouse Manager", "D"),
+        job(5, "Operations Director", "Buffalo, NY"),
+      ],
+      limit: 2,
+      ask: () => {
+        calls++;
+        return Promise.resolve({ verdict: VERDICT, usage: { input: 1, cached: 0, output: 1 } });
+      },
+      save: () => Promise.resolve(),
+    });
+    assertEquals(calls, 2);
+    assertEquals(report.scored, 5); // 4 copies + 1 — the Director was reached
+  })();
 });
