@@ -127,3 +127,44 @@ Deno.test("clean decodes entities and collapses whitespace", () => {
   assertEquals(clean("a&#39;s"), "a's");
   assertEquals(clean("x   \n\n\n\n   y"), "x\n\ny");
 });
+
+Deno.test("page furniture is dropped before the text fallback is taken", () => {
+  // Verbatim shape of what the UB careers portal actually returned: the first
+  // 200 characters of the "description" were "Skip to Main Content / Toggle
+  // navigation / Home / Search Jobs / Job Alerts / Log In". Nav text is not
+  // neutral — the scorer reads it as part of the role.
+  const html = `<html><body>
+<header>Skip to Main Content Employment Opportunities</header>
+<nav>Home Search Jobs Job Alerts Log In Create Account Help</nav>
+<main><h1>Assistant Vice President of Operations</h1>
+<p>${"Provides strategic leadership for the repair, maintenance and operations of 110 buildings across three campuses. ".repeat(6)}</p></main>
+<footer>Privacy Policy Accessibility Contact Us</footer>
+</body></html>`;
+  const r = extract(html);
+  assertEquals(r.via, "text");
+  assertTrue(r.description!.startsWith("Assistant Vice President of Operations"));
+  for (const junk of ["Skip to Main Content", "Search Jobs", "Log In", "Privacy Policy"]) {
+    assertTrue(!r.description!.includes(junk), `leaked: ${junk}`);
+  }
+});
+
+Deno.test("an empty <main> shell falls through to the body", () => {
+  // Single-page apps ship <main></main> and render into it later. Trusting a
+  // near-empty <main> would throw away the content that IS in the HTML.
+  const html = `<html><body><main><div id="root"></div></main>
+<div>${"The role runs a 250,000 square foot distribution centre. ".repeat(15)}</div>
+</body></html>`;
+  const r = extract(html);
+  assertEquals(r.via, "text");
+  assertTrue(r.description!.includes("250,000 square foot"));
+});
+
+Deno.test("JSON-LD still wins over main-content extraction", () => {
+  const html = `<html><body><nav>Home Jobs</nav>
+<script type="application/ld+json">{"@type":"JobPosting","description":"${"The real posting body. ".repeat(20)}"}</script>
+<main>${"Some other page text entirely. ".repeat(20)}</main></body></html>`;
+  const r = extract(html);
+  assertEquals(r.via, "json-ld");
+  assertTrue(r.description!.includes("The real posting body"));
+  assertTrue(!r.description!.includes("Some other page text"));
+});

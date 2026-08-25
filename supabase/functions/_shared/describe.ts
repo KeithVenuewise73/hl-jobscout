@@ -45,6 +45,38 @@ const stripTags = (s: string) =>
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ");
 
+// Page furniture. Taking a whole page as text yields "Skip to Main Content /
+// Toggle navigation / Home / Search Jobs / Log In" before a word of the job —
+// which the first real run against a university careers portal produced
+// exactly. Nav text is not neutral noise: the scorer reads it as part of the
+// role.
+const CHROME =
+  /<(nav|header|footer|aside|form|select|button|noscript)\b[\s\S]*?<\/\1>/gi;
+
+/**
+ * Narrow to the part of the page that is the posting.
+ *
+ * <main> / <article> / role="main" are the semantics that say "this is the
+ * content"; most ATS portals and careers sites set at least one. When none is
+ * present we keep the whole body and only drop the furniture — a coarser
+ * answer, but never a worse one than not trying.
+ */
+export function mainContent(html: string): string {
+  const body = (/<body\b[^>]*>([\s\S]*)<\/body>/i.exec(html)?.[1] ?? html)
+    .replace(CHROME, " ");
+  for (const re of [
+    /<main\b[^>]*>([\s\S]*?)<\/main>/i,
+    /<article\b[^>]*>([\s\S]*?)<\/article>/i,
+    /<[a-z]+[^>]+role=["']main["'][^>]*>([\s\S]*?)<\/[a-z]+>/i,
+  ]) {
+    const m = re.exec(body);
+    // A <main> holding almost nothing means the real content is elsewhere
+    // (a single-page app shell, say), so fall through rather than trust it.
+    if (m && stripTags(m[1]).replace(/\s+/g, " ").trim().length > 300) return m[1];
+  }
+  return body;
+}
+
 const entities: Record<string, string> = {
   "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'",
   "&apos;": "'", "&nbsp;": " ", "&ndash;": "-", "&mdash;": "-", "&rsquo;": "'",
@@ -121,9 +153,10 @@ export function extract(html: string, maxChars = 12_000): Extracted {
     }
   }
 
-  // Fallback: the whole page as text. Coarse, and marked as such — a scorer
-  // reading nav links and a cookie banner should know that is what it has.
-  const text = clean(stripTags(html));
+  // Fallback: the page's main content as text, with the furniture removed.
+  // Coarser than JobPosting and marked as such, so a caller can decide whether
+  // to trust it — jobscout-describe refuses to save it unless told to.
+  const text = clean(stripTags(mainContent(html)));
   if (text.length < 400) return { description: null, comp_text: null, via: "none" };
   return {
     description: text.slice(0, maxChars),
