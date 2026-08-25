@@ -125,3 +125,63 @@ Deno.test("an unknown company does not crash the posting block", async () => {
   });
   assertEquals(r.scored, 1);
 });
+
+Deno.test("a systemic failure stops the run instead of repeating itself", () => {
+  // Regression from the first live run: an empty Anthropic credit balance
+  // produced fifteen postings' worth of the identical 400. That error belongs
+  // to the run, not to any posting, and hammering the whole queue with it wastes
+  // calls and buries the real message in a wall of duplicates.
+  return (async () => {
+    const jobs = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1, company_id: 1, title: `Operations Manager ${i}`,
+    }));
+    let calls = 0;
+    const report = await runScore({
+      resume: RESUME,
+      jobs,
+      companies: new Map([[1, { id: 1, name: "Acme" }]]),
+      ask: () => {
+        calls++;
+        return Promise.reject(new Error("400 credit balance is too low"));
+      },
+      save: () => Promise.resolve(),
+    });
+    assertEquals(calls, 3);
+    assertEquals(report.scored, 0);
+    assertEquals(report.failed, 3);
+    assertTrue((report.aborted ?? "").includes("credit balance"));
+    // The 17 it never reached are reported, not silently forgotten.
+    assertEquals(report.held_back_by_budget, 17);
+  })();
+});
+
+Deno.test("an isolated failure does not stop the run", () => {
+  // The counter has to RESET on success, or three scattered bad postings in a
+  // long queue would abort a run that is working perfectly well.
+  return (async () => {
+    const jobs = Array.from({ length: 6 }, (_, i) => ({
+      id: i + 1, company_id: 1, title: `Operations Manager ${i}`,
+    }));
+    const report = await runScore({
+      resume: RESUME,
+      jobs,
+      companies: new Map([[1, { id: 1, name: "Acme" }]]),
+      // Fail every other posting: never three in a row.
+      ask: (_p, posting) =>
+        /[135]/.test(posting.match(/Manager (\d)/)?.[1] ?? "")
+          ? Promise.reject(new Error("posting-specific boom"))
+          : Promise.resolve({
+            verdict: {
+              fit_score: 50, verdict: "maybe" as const,
+              why_fits: "x", why_not: "y", resume_angle: "z",
+            },
+            usage: { input: 10, cached: 0, output: 5 },
+          }),
+      save: () => Promise.resolve(),
+    });
+    assertEquals(report.scored, 3);
+    assertEquals(report.failed, 3);
+    assertEquals(report.aborted, undefined);
+    assertEquals(report.held_back_by_budget, 0);
+  })();
+});

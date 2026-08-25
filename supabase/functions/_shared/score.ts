@@ -153,6 +153,8 @@ export interface ScoreReport {
   held_back_by_budget: number;
   usage: Usage;
   failures: { job_id: number; title: string; error: string }[];
+  /** Set when the run stopped early because the failures were systemic. */
+  aborted?: string;
 }
 
 export interface ScoreDeps {
@@ -165,6 +167,8 @@ export interface ScoreDeps {
   budgetMs?: number;
   limit?: number;
   saveEvery?: number;
+  /** Consecutive failures that end the run. See the abort logic in runScore. */
+  failFast?: number;
 }
 
 export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
@@ -172,6 +176,7 @@ export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
   const budgetMs = deps.budgetMs ?? 120_000;
   const limit = deps.limit ?? 250;
   const saveEvery = deps.saveEvery ?? 10;
+  const failFast = deps.failFast ?? 3;
   const started = now();
 
   // The caller decides what deserves scoring. Stage-1 filtering lives in
@@ -185,6 +190,8 @@ export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
   let batch: ScoreRow[] = [];
   let scored = 0;
   let processed = 0;
+  let inARow = 0;
+  let aborted: string | undefined;
 
   const flush = async () => {
     if (!batch.length) return;
@@ -203,10 +210,30 @@ export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
       usage.output += u.output;
       batch.push({ ...verdict, job_id: j.id, resume_id: deps.resume.id, model: MODEL });
       scored++;
+      inARow = 0;
       if (batch.length >= saveEvery) await flush();
     } catch (e) {
       const err = e as Error;
       failures.push({ job_id: j.id, title: j.title, error: `${err?.name}: ${err?.message}` });
+
+      // Some failures belong to the posting; some belong to the RUN. An empty
+      // credit balance, a revoked key, a wrong model name — none of those get
+      // better on the next posting, and retrying them 250 times produces 250
+      // identical errors and a report nobody can read. The first live run did
+      // exactly that: fifteen postings, fifteen copies of "credit balance is
+      // too low".
+      //
+      // Rather than pattern-match on provider wording that can change, stop on
+      // the SHAPE of the problem: several in a row means it is not the posting.
+      // Aborting is cheap because the run resumes — anything already scored is
+      // skipped next time — so the cost of stopping early is one re-run, and
+      // the cost of not stopping is the whole queue.
+      if (++inARow >= failFast) {
+        aborted = `stopped after ${inARow} consecutive failures — ` +
+          `this looks like a problem with the run, not with the postings. ` +
+          `Last error: ${err?.message ?? err?.name}`;
+        break;
+      }
     }
   }
   await flush();
@@ -217,5 +244,6 @@ export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
     held_back_by_budget: (queue.length - processed) + (deps.jobs.length - queue.length),
     usage,
     failures,
+    ...(aborted ? { aborted } : {}),
   };
 }
