@@ -44,11 +44,14 @@ Deno.serve(async () => {
         .upsert(rows, { onConflict: "company_id,ats_job_id" });
       if (error) throw new Error(error.message);
     },
-    async closeStale(companyId, before) {
+    async closeStale(companyId, before, source) {
       const { data, error } = await admin
         .from("jobs")
         .update({ is_open: false })
         .eq("company_id", companyId)
+        // Only what this crawler owns. Without it an ATS crawl closes the
+        // alert-sourced rows for the same employer, which it has never seen.
+        .eq("source", source)
         .eq("is_open", true)
         .lt("last_seen", before)
         .select("id");

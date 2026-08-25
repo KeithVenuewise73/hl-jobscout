@@ -168,3 +168,30 @@ Deno.test("a crawl writes only postings at the right level, and says how many it
     assertEquals(report.postings_seen, 2);
   })();
 });
+
+Deno.test("a crawl closes only what it crawled, never another source's jobs", () => {
+  // Real data loss, found live. closeStale scoped by company alone, so the ADP
+  // and Workday crawls shut four jobs that LinkedIn alerts had found — among
+  // them Epiq's "Director, Strategic Alliances", which is not on Epiq's Workday
+  // board at all. The crawl had never seen it and had no business closing it.
+  return (async () => {
+    const closeCalls: { companyId: number; source: string }[] = [];
+    await runIngest({
+      db: {
+        dueCompanies: () =>
+          Promise.resolve([{ id: 12, name: "New Era Cap", ats: "adp", board_token: "x" }]),
+        upsertJobs: () => Promise.resolve(),
+        closeStale: (companyId, _before, source) => {
+          closeCalls.push({ companyId, source });
+          return Promise.resolve(0);
+        },
+        markCrawled: () => Promise.resolve(),
+      },
+      http: () =>
+        Promise.resolve({
+          jobRequisitions: [{ itemID: "1", requisitionTitle: "Operations Manager" }],
+        }),
+    });
+    assertEquals(closeCalls, [{ companyId: 12, source: "ats" }]);
+  })();
+});

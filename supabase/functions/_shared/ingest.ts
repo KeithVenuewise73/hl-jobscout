@@ -29,8 +29,18 @@ export interface Db {
   /** Active, adapter-backed companies, oldest crawl first. */
   dueCompanies(limit: number): Promise<Company[]>;
   upsertJobs(rows: JobRow[]): Promise<void>;
-  /** Close this company's open jobs whose last_seen is older than `before`. Returns the count. */
-  closeStale(companyId: number, before: string): Promise<number>;
+  /**
+   * Close this company's open ATS-sourced jobs whose last_seen predates
+   * `before`. Returns the count.
+   *
+   * SCOPED BY SOURCE, and that is not a detail. A crawl knows what is on the
+   * board it just read and nothing else. Closing every open row for the
+   * company shut four alert-sourced jobs the crawler had never seen — among
+   * them Epiq's "Director, Strategic Alliances", which a LinkedIn alert found
+   * and which simply is not on Epiq's Workday board. A crawler may only close
+   * what it is responsible for.
+   */
+  closeStale(companyId: number, before: string, source: string): Promise<number>;
   markCrawled(companyId: number, at: string): Promise<void>;
 }
 
@@ -144,7 +154,7 @@ export async function runIngest(deps: IngestDeps): Promise<IngestReport> {
 
     let closed = 0;
     try {
-      closed = await deps.db.closeStale(c.id!, runStart);
+      closed = await deps.db.closeStale(c.id!, runStart, "ats");
     } catch (e) {
       results.push({ company: name, ats, seen: rows.length, closed: 0, error: `close: ${errText(e)}` });
       continue;
