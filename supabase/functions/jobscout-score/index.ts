@@ -78,7 +78,12 @@ Deno.serve(async () => {
   const ask: Ask = async (prefix, posting) => {
     const r = await claude.messages.create({
       model: MODEL,
-      max_tokens: 2000,
+      // Thinking is ON BY DEFAULT on Opus 5 and its tokens count against this
+      // cap. At 2000 a posting with a long description can hit the ceiling
+      // mid-JSON, and a truncated response is a failed posting, not a cheap
+      // one. Headroom costs nothing — billing is on tokens produced, not on
+      // the cap.
+      max_tokens: 16000,
       system: SYSTEM,
       messages: [{
         role: "user",

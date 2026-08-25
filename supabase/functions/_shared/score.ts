@@ -91,10 +91,23 @@ experience to lead with in the first line of a cover letter for THIS job —
 leave it empty when the verdict is pass.`;
 
 // The API validates against this, so there is no JSON to repair on our side.
+//
+// NO `minimum`/`maximum` on fit_score, however tempting. Structured outputs
+// accept only a subset of JSON Schema, and numeric constraints are not in it —
+// the first live run came back "For 'integer' type, properties maximum, minimum
+// are not supported" on every posting. (The Zod helper strips unsupported
+// keywords for you; a raw schema like this one is sent verbatim.)
+//
+// So the range is stated in `description`, which the model does read, and
+// enforced by clampScore below. The schema guarantees an integer; we guarantee
+// it is an integer between 0 and 100.
 export const SCHEMA = {
   type: "object",
   properties: {
-    fit_score: { type: "integer", minimum: 0, maximum: 100 },
+    fit_score: {
+      type: "integer",
+      description: "Fit from 0 to 100. Most postings land near 40; a real match is rare.",
+    },
     verdict: { type: "string", enum: ["apply", "maybe", "pass"] },
     why_fits: { type: "string" },
     why_not: { type: "string" },
@@ -103,6 +116,10 @@ export const SCHEMA = {
   required: ["fit_score", "verdict", "why_fits", "why_not", "resume_angle"],
   additionalProperties: false,
 } as const;
+
+/** The bound the schema can no longer express. */
+export const clampScore = (n: number): number =>
+  Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 0;
 
 /**
  * The stable prefix — byte-identical for every posting in a run, so it caches
@@ -208,7 +225,13 @@ export async function runScore(deps: ScoreDeps): Promise<ScoreReport> {
       usage.input += u.input;
       usage.cached += u.cached;
       usage.output += u.output;
-      batch.push({ ...verdict, job_id: j.id, resume_id: deps.resume.id, model: MODEL });
+      batch.push({
+        ...verdict,
+        fit_score: clampScore(verdict.fit_score),
+        job_id: j.id,
+        resume_id: deps.resume.id,
+        model: MODEL,
+      });
       scored++;
       inARow = 0;
       if (batch.length >= saveEvery) await flush();

@@ -1,7 +1,7 @@
 import { assertEquals, assertStringIncludes, assertTrue } from "./assert.ts";
 import {
-  postingBlock, resumePrefix, runScore, type Ask, type Job, type Resume,
-  type ScoreRow,
+  clampScore, postingBlock, resumePrefix, runScore, SCHEMA,
+  type Ask, type Job, type Resume, type ScoreRow,
 } from "../_shared/score.ts";
 import { eligible } from "../_shared/filters.ts";
 
@@ -183,5 +183,59 @@ Deno.test("an isolated failure does not stop the run", () => {
     assertEquals(report.failed, 3);
     assertEquals(report.aborted, undefined);
     assertEquals(report.held_back_by_budget, 0);
+  })();
+});
+
+Deno.test("the schema uses no keyword structured outputs rejects", () => {
+  // The first live run failed on every posting with "For 'integer' type,
+  // properties maximum, minimum are not supported". Structured outputs accept
+  // a subset of JSON Schema; numeric and string constraints are not in it, and
+  // a raw schema (unlike the Zod helper) is sent to the API verbatim.
+  const banned = ["minimum", "maximum", "multipleOf", "minLength", "maxLength",
+                  "minItems", "maxItems", "pattern"];
+  const walk = (node: unknown, path: string): void => {
+    if (!node || typeof node !== "object") return;
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      assertEquals(banned.includes(k), false, `${path}.${k} is not supported`);
+      walk(v, `${path}.${k}`);
+    }
+  };
+  walk(SCHEMA, "SCHEMA");
+  // additionalProperties:false is REQUIRED, so assert it did not get lost.
+  assertEquals(SCHEMA.additionalProperties, false);
+});
+
+Deno.test("the score range is enforced in code, since the schema cannot", () => {
+  assertEquals(clampScore(150), 100);
+  assertEquals(clampScore(-20), 0);
+  assertEquals(clampScore(72.6), 73);
+  assertEquals(clampScore(NaN), 0);
+  assertEquals(clampScore(55), 55);
+});
+
+Deno.test("an out-of-range score is clamped before it reaches the database", () => {
+  // fit_score is a plain int column feeding a `order by fit_score desc` view.
+  // A 150 would sort above every real result and quietly top the shortlist.
+  return (async () => {
+    let saved: ScoreRow[] = [];
+    await runScore({
+      resume: RESUME,
+      jobs: [{ id: 1, company_id: 1, title: "Operations Director" }],
+      companies: new Map([[1, { id: 1, name: "Acme" }]]),
+      ask: () =>
+        Promise.resolve({
+          verdict: {
+            fit_score: 150, verdict: "apply" as const,
+            why_fits: "x", why_not: "y", resume_angle: "z",
+          },
+          usage: { input: 10, cached: 0, output: 5 },
+        }),
+      save: (rows) => {
+        saved = saved.concat(rows);
+        return Promise.resolve();
+      },
+    });
+    assertEquals(saved.length, 1);
+    assertEquals(saved[0].fit_score, 100);
   })();
 });
