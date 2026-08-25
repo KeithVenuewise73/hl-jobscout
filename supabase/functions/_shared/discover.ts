@@ -60,8 +60,34 @@ export function unresolved(evidence: string, extra: Partial<Detection> = {}): De
   return { ats: "unknown", board_token: null, supported: false, evidence, ...extra };
 }
 
+// A cheap substring gate in front of each pattern. Running 15 regexes over a
+// few hundred KB of markup, for 7 pages per company, is what burned the edge
+// worker's CPU budget — indexOf is an order of magnitude cheaper than a regex
+// scan, and it rules out almost every pattern on almost every page.
+const MARKERS: Record<string, string[]> = {
+  greenhouse: ["greenhouse.io"],
+  lever: ["lever.co"],
+  ashby: ["ashbyhq.com"],
+  smartrecruiters: ["smartrecruiters.com"],
+  workday: ["myworkdayjobs.com"],
+  icims: ["icims.com"],
+  paylocity: ["paylocity.com"],
+  adp: ["adp.com"],
+  ukg: ["ultipro.com", "ukg.com"],
+  jazzhr: ["applytojob.com"],
+  bamboohr: ["bamboohr.com"],
+  paycom: ["paycomonline.net"],
+  taleo: ["taleo.net"],
+  recruitee: ["recruitee.com"],
+  workable: ["workable.com"],
+};
+
 export function fingerprint(html: string, finalUrl: string): Detection | null {
+  const hay = html.toLowerCase();
+  const url = finalUrl.toLowerCase();
   for (const [ats, pat] of SIGNATURES) {
+    const markers = MARKERS[ats];
+    if (markers && !markers.some((m) => hay.includes(m) || url.includes(m))) continue;
     const m = pat.exec(html) ?? pat.exec(finalUrl);
     if (!m) continue;
     const rec: Detection = {

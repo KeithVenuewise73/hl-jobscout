@@ -17,13 +17,13 @@ import { validateRedirect, validateUrl } from "../_shared/url.ts";
 // fetches, buffered whole pages (200-280KB each), and was killed with
 // WORKER_RESOURCE_LIMIT after four. Small batches, hard caps, run more often.
 const BUDGET_MS = Number(Deno.env.get("JOBSCOUT_DISCOVER_BUDGET_MS") ?? 60_000);
-const BATCH = Number(Deno.env.get("JOBSCOUT_DISCOVER_BATCH") ?? 6);
+const BATCH = Number(Deno.env.get("JOBSCOUT_DISCOVER_BATCH") ?? 3);
 const PER_COMPANY_MS = Number(Deno.env.get("JOBSCOUT_DISCOVER_COMPANY_MS") ?? 20_000);
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/124 Safari/537.36";
 // An ATS link is a short string in the markup. 400KB of any careers page is far
 // more than enough to find one, and buffering more is what killed the worker.
-const MAX_HTML = 400 * 1024;
+const MAX_HTML = 200 * 1024;
 const PAGE_TIMEOUT_MS = 10_000;
 
 // Careers pages are arbitrary third-party URLs, so every hop is SSRF-checked.
