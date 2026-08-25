@@ -34,6 +34,21 @@ Deno.test("an ATS we detect but cannot ingest is flagged unsupported, not droppe
   assertEquals(ic!.supported, false);   // still your target list — needs an adapter
 });
 
+Deno.test("UKG token is the tenant path, not the shared 'recruiting' host", () => {
+  // The first live run recorded board_token='recruiting' for Rosina, Upstate
+  // Niagara and Curbell — every UKG customer sits behind the same host, so the
+  // subdomain identifies nobody. The tenant is the first path segment.
+  const u = fingerprint(
+    '<a href="https://recruiting.ultipro.com/ROS1004ROSIN/JobBoard/x">Careers</a>', "",
+  );
+  assertEquals(u!.ats, "ukg");
+  assertEquals(u!.board_token, "ROS1004ROSIN");
+  // A genuine per-tenant subdomain still resolves to that subdomain.
+  const v = fingerprint('<a href="https://acmecorp.ultipro.com/jobs">Jobs</a>', "");
+  assertEquals(v!.ats, "ukg");
+  assertEquals(v!.board_token, "acmecorp");
+});
+
 Deno.test("a failed fetch returns a well-formed record, not a crash", async () => {
   const dead: FetchPage = () => Promise.reject(new TypeError("connection refused"));
   const r = await probe("https://acme.com", dead);

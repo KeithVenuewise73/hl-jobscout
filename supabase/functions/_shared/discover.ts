@@ -33,7 +33,13 @@ export const SIGNATURES: [string, RegExp][] = [
   ["icims", /([a-zA-Z0-9-]+)\.icims\.com/],
   ["paylocity", /recruiting\.paylocity\.com\/recruiting\/jobs\/List\/(\d+)/],
   ["adp", /workforcenow\.adp\.com\/(?:mascsr\/default\/mdf\/recruitment\/recruitment\.html\?cid=)?([a-f0-9-]{20,})/],
-  ["ukg", /([a-zA-Z0-9-]+)\.(?:ultipro|ukg)\.com/],
+  // recruiting.ultipro.com is the SHARED host every UKG customer sits behind,
+  // so the subdomain is not a tenant id — the tenant is the first path segment
+  // (e.g. recruiting.ultipro.com/ROS1004ROSIN/JobBoard/...). Matching the
+  // subdomain recorded "recruiting" as the board token for three different
+  // employers, which is a wrong value stored as if it were right.
+  ["ukg", /(?:recruiting|recruiting\d*)\.(?:ultipro|ukg)\.com\/([A-Za-z0-9_-]{4,})/],
+  ["ukg", /(?!recruiting|www)([a-zA-Z0-9-]+)\.(?:ultipro|ukg)\.com/],
   ["jazzhr", /([a-zA-Z0-9-]+)\.applytojob\.com/],
   ["bamboohr", /([a-zA-Z0-9-]+)\.bamboohr\.com\/(?:jobs|careers)/],
   ["paycom", /paycomonline\.net\/v4\/ats\/web\.php\/jobs\?clientkey=([A-F0-9]+)/],

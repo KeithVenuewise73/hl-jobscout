@@ -88,23 +88,43 @@ Deno.serve(async () => {
     { db: { schema: "jobscout" } },
   );
 
-  const { data: pending, error } = await admin
-    .from("companies")
-    .select("id,name,website,ats")
-    .eq("active", true)
-    .not("website", "is", null)
-    .or("ats.is.null,ats.eq.unknown")
-    .order("discover_attempted_at", { ascending: true, nullsFirst: true })
+  // Never-attempted companies FIRST, then the oldest retries.
+  //
+  // Deliberately two queries rather than one ordered by discover_attempted_at
+  // with nullsFirst. Postgres sorts NULL LAST in ascending order, and the live
+  // run proved the client's nullsFirst did not change that: 21 of 58 employers
+  // sat permanently at the bottom of the queue while the same handful were
+  // re-crawled twice a day, and every run reported success. A silent gap in
+  // coverage is the worst failure this thing can have, so it does not rely on
+  // NULL-ordering semantics at all.
+  const base = () =>
+    admin.from("companies").select("id,name,website,ats")
+      .eq("active", true)
+      .not("website", "is", null)
+      .or("ats.is.null,ats.eq.unknown");
+
+  const { data: fresh, error } = await base()
+    .is("discover_attempted_at", null)
     .order("priority", { ascending: true })
     .limit(BATCH);
   if (error) return json({ ok: false, error: error.message }, 500);
 
+  const pending = [...(fresh ?? [])];
+  if (pending.length < BATCH) {
+    const { data: retries, error: rErr } = await base()
+      .not("discover_attempted_at", "is", null)
+      .order("discover_attempted_at", { ascending: true })
+      .limit(BATCH - pending.length);
+    if (rErr) return json({ ok: false, error: rErr.message }, 500);
+    pending.push(...(retries ?? []));
+  }
+
   const detail: unknown[] = [];
   let resolved = 0, deferred = 0;
 
-  for (const c of pending ?? []) {
+  for (const c of pending) {
     if (Date.now() - started > BUDGET_MS) {
-      deferred = (pending?.length ?? 0) - detail.length;
+      deferred = pending.length - detail.length;
       break;
     }
     const det = await findCareersPage(c.website as string, fetchPage, {
@@ -134,12 +154,21 @@ Deno.serve(async () => {
     .not("website", "is", null)
     .or("ats.is.null,ats.eq.unknown");
 
+  const { count: neverTried } = await admin
+    .from("companies")
+    .select("id", { count: "exact", head: true })
+    .eq("active", true)
+    .not("website", "is", null)
+    .is("discover_attempted_at", null);
+
   const report = {
     elapsed_ms: Date.now() - started,
     attempted: detail.length,
     deferred_this_batch: deferred,
     // Unresolved across the WHOLE list, so a caller knows to run again.
     still_unresolved: stillPending ?? null,
+    // If this never reaches 0, coverage is stuck — that is the number to watch.
+    never_attempted: neverTried ?? null,
     ingestible_today: resolved,
     detail,
   };
