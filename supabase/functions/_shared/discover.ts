@@ -58,9 +58,28 @@ export const SIGNATURES: [string, RegExp][] = [
 // Ordered by observed yield. Every extra hint is another full page fetch held
 // in memory, and the edge runtime kills the worker before politeness does —
 // the first real run died with WORKER_RESOURCE_LIMIT after four companies.
+//
+// /en/careers and /en-us/jobs are here because a multinational puts its careers
+// site behind a locale prefix and answers 404 on the bare path. Atlas Copco —
+// the employer whose Sanborn role started this — was recorded as having no ATS
+// for exactly that reason.
 export const CAREER_HINTS = [
   "/careers", "/careers/", "/career", "/jobs", "/employment", "/join-us",
+  "/en/careers", "/en-us/jobs",
 ];
+
+/**
+ * Careers on a SUBDOMAIN, which is where large employers usually put them.
+ *
+ * International Paper was recorded as "no ATS link" while its board sat in
+ * plain sight at jobs.internationalpaper.com. Probing the homepage and a few
+ * paths cannot find that, however many paths you add.
+ *
+ * These run FIRST because they are the highest-yield guesses available: a host
+ * called jobs.<company> is a job board or it is nothing, so a hit is decisive
+ * and a miss costs one DNS failure rather than a page download.
+ */
+export const CAREER_SUBDOMAINS = ["jobs", "careers"];
 
 /** The shape every caller can rely on. */
 export function unresolved(evidence: string, extra: Partial<Detection> = {}): Detection {
@@ -154,18 +173,27 @@ export async function findCareersPage(
 
   const tried: string[] = [];
 
-  const home = await probe(base, get);
-  if (home.ats !== "unknown") return { ...home, careers_url: base };
-  tried.push(`/: ${home.evidence}`);
+  // Subdomains first (highest yield), then the homepage, then the paths.
+  const host = new URL(base).host;
+  const bare = host.replace(/^www\./, "");
+  const candidates: string[] = [
+    ...(bare.split(".").length <= 3
+      ? CAREER_SUBDOMAINS.map((s) => `https://${s}.${bare}`)
+      : []),
+    base,
+    ...CAREER_HINTS.map((h) => base + h),
+  ];
 
-  for (const hint of CAREER_HINTS) {
+  for (const url of candidates) {
     if (now() >= deadline) {
-      tried.push("deadline reached — remaining paths not tried");
+      tried.push("deadline reached — remaining candidates not tried");
       break;
     }
-    const res = await probe(base + hint, get);
-    if (res.ats !== "unknown") return { ...res, careers_url: base + hint };
-    tried.push(`${hint}: ${res.evidence}`);
+    const res = await probe(url, get);
+    if (res.ats !== "unknown") return { ...res, careers_url: url };
+    // Record the path, or the whole URL for a subdomain — "no ATS link" against
+    // an unnamed target is the useless kind of evidence this exists to avoid.
+    tried.push(`${url.startsWith(base) ? url.slice(base.length) || "/" : url}: ${res.evidence}`);
   }
   return unresolved(tried.join(" | ").slice(0, 500), { careers_url: base });
 }

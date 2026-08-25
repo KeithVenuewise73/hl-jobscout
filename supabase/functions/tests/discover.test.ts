@@ -1,4 +1,4 @@
-import { assertEquals } from "./assert.ts";
+import { assertEquals, assertStringIncludes, assertTrue } from "./assert.ts";
 import {
   findCareersPage, fingerprint, INGESTIBLE, probe, type FetchPage,
 } from "../_shared/discover.ts";
@@ -118,4 +118,74 @@ Deno.test("a malformed website field does not throw", async () => {
   const get: FetchPage = () => Promise.reject(new Error("never called"));
   const r = await findCareersPage("http://[not a url", get);
   assertEquals(r.ats, "unknown");
+});
+
+Deno.test("careers on a subdomain are found — the homepage cannot show them", () => {
+  // International Paper was recorded as "no ATS link" while its board sat at
+  // jobs.internationalpaper.com. Probing the homepage and a list of paths
+  // cannot find that, however many paths you add.
+  return (async () => {
+    const get: FetchPage = (url) => {
+      if (url === "https://jobs.internationalpaper.com") {
+        return Promise.resolve({
+          html: `<a href="https://internationalpaper.wd5.myworkdayjobs.com/en-US/IP_Careers">Search</a>`,
+          finalUrl: url,
+        });
+      }
+      return Promise.reject(new Error("ENOTFOUND"));
+    };
+    const d = await findCareersPage("https://www.internationalpaper.com", get);
+    assertEquals(d.ats, "workday");
+    assertEquals(d.supported, true);
+    assertEquals(d.careers_url, "https://jobs.internationalpaper.com");
+  })();
+});
+
+Deno.test("a locale-prefixed careers path is tried", () => {
+  // Atlas Copco — the employer whose Sanborn role started this — 404s on every
+  // bare path and serves its careers site from /en/careers.
+  return (async () => {
+    const get: FetchPage = (url) => {
+      if (url === "https://www.atlascopcogroup.com/en/careers") {
+        return Promise.resolve({
+          html: `<a href="https://atlascopco.wd3.myworkdayjobs.com/en-US/AtlasCopco">Jobs</a>`,
+          finalUrl: url,
+        });
+      }
+      if (url.includes("jobs.") || url.includes("careers.")) {
+        return Promise.reject(new Error("ENOTFOUND"));
+      }
+      return Promise.resolve({ html: "<p>products</p>", finalUrl: url });
+    };
+    const d = await findCareersPage("https://www.atlascopcogroup.com", get);
+    assertEquals(d.ats, "workday");
+    assertEquals(d.careers_url, "https://www.atlascopcogroup.com/en/careers");
+  })();
+});
+
+Deno.test("subdomain probing does not stack onto an already-deep host", () => {
+  // "jobs.careers.eu.acme.co.uk" is not a guess worth making, and each one
+  // costs a DNS round trip inside a per-company deadline.
+  return (async () => {
+    const seen: string[] = [];
+    const get: FetchPage = (url) => {
+      seen.push(url);
+      return Promise.resolve({ html: "<p>nothing</p>", finalUrl: url });
+    };
+    await findCareersPage("https://careers.eu.acme.co.uk", get);
+    assertTrue(!seen.some((u) => u.startsWith("https://jobs.careers.")), seen.join(","));
+  })();
+});
+
+Deno.test("evidence still names what was tried, subdomains included", () => {
+  return (async () => {
+    const get: FetchPage = (url) =>
+      url.includes("jobs.")
+        ? Promise.reject(new Error("ENOTFOUND"))
+        : Promise.resolve({ html: "<p>none</p>", finalUrl: url });
+    const d = await findCareersPage("https://acme.com", get);
+    assertEquals(d.ats, "unknown");
+    assertStringIncludes(d.evidence, "jobs.acme.com");
+    assertStringIncludes(d.evidence, "ENOTFOUND");
+  })();
 });
