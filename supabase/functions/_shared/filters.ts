@@ -19,6 +19,9 @@ export const TITLE_INCLUDE = [
   "logistics", "supply chain", "transportation", "fleet", "dispatch",
   "general manager", "site manager", "branch manager", "market manager",
   "area manager", "regional manager", "district manager",
+  // Target level: Senior Manager / Director of Operations and up.
+  "senior manager", "sr manager", "sr. manager", "head of", "chief",
+  "vice president", "senior director", "executive director",
   "facility", "facilities", "field service", "service manager", "terminal",
   "director", "president", "chief operating",
   "continuous improvement", "process improvement", "3pl", "last mile",
@@ -28,7 +31,11 @@ export const TITLE_INCLUDE = [
 
 // Short/ambiguous terms that need boundaries on BOTH sides — left-bounded
 // "hub" matches "Hubbard", "vp" matches "VPN".
-export const TITLE_INCLUDE_EXACT = ["vp", "coo", "gm", "hub", "dsd", "dc"];
+// "Mgr US Brokerage" and "Ops Director" are real postings that died on the
+// spelled-out list. Bounded on both sides so they cannot match inside a word.
+export const TITLE_INCLUDE_EXACT = [
+  "vp", "coo", "gm", "hub", "dsd", "dc", "mgr", "ops", "svp", "avp",
+];
 
 // These beat the exclusion list. "Driver Manager" is a transportation
 // management job, not a driving job, and the rule that kills "Delivery Driver"
@@ -40,6 +47,13 @@ export const TITLE_RESCUE = [
 ];
 
 export const TITLE_EXCLUDE = [
+  // Unambiguously below the target level. Anything arguable — a plain
+  // "Manager", a "Supervisor" at a real industrial site — is left IN and judged
+  // by the model, which reads scope from the description. A keyword cannot tell
+  // a 80-person DC manager from a shift lead; the posting can.
+  "assistant manager", "assistant director", "associate manager",
+  "shift supervisor", "shift lead", "shift manager", "team lead",
+  "crew lead", "crew leader", "trainee", "management trainee",
   "intern", "internship", "associate", "clerk", "driver", "cdl",
   "technician", "engineer i", "software", "nurse", "rn", "physician",
   "sales representative", "cashier", "part-time", "part time", "seasonal",

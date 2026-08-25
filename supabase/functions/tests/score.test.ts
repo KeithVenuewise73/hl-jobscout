@@ -6,7 +6,9 @@ import {
 
 const RESUME: Resume = {
   id: 1, label: "keith-ops-2026", content: "20 years running distribution.",
-  comp_floor: 80000, dealbreakers: ["relocation required"], must_have: ["Western New York"],
+  comp_floor: 75000, comp_target_low: 100000, comp_target_high: 200000,
+  target_level: "Senior Manager / Director of Operations",
+  dealbreakers: ["relocation required"], must_have: ["Within 50 miles of Buffalo, NY"],
 };
 
 const CO = new Map([[9, { id: 9, name: "Acme", city: "Buffalo", state: "NY", owner_type: "family", size_band: "mid" }]]);
@@ -27,7 +29,9 @@ Deno.test("the prefix is byte-identical across postings — that is what makes i
   const b = resumePrefix(RESUME);
   assertEquals(a, b);
   assertStringIncludes(a, "20 years running distribution.");
-  assertStringIncludes(a, "$80,000/yr");
+  assertStringIncludes(a, "$75,000/yr");
+  assertStringIncludes(a, "$100,000 - $200,000/yr");
+  assertStringIncludes(a, "Senior Manager / Director of Operations");
   assertStringIncludes(a, "relocation required");
 });
 

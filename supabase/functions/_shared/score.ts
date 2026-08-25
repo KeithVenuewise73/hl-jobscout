@@ -17,7 +17,14 @@ export interface Resume {
   content: string;
   must_have?: string[] | null;
   dealbreakers?: string[] | null;
+  /** Walk-away number. Below this, a stated salary caps the score. */
   comp_floor?: number | null;
+  /** The band actually being aimed at. Distinct from the floor on purpose: a
+   *  role below target is disappointing, a role below floor is a no. */
+  comp_target_low?: number | null;
+  comp_target_high?: number | null;
+  /** e.g. "Senior Manager / Director of Operations". */
+  target_level?: string | null;
 }
 
 export interface Job {
@@ -59,13 +66,26 @@ export const SYSTEM = `You screen job postings for one specific candidate. You a
 calibrated — most postings are a 40, a real match is rare. Inflated scores make \
 the tool useless.
 
-Score on:
+SENIORITY IS THE FIRST TEST. The candidate's TARGET LEVEL is stated in his
+profile below. Judge the level by the SCOPE the posting actually describes —
+headcount, sites, budget, who it reports to — not by the words in the title. A
+"Manager" running a single DC with 80 people and a P&L can be the right level;
+a "Director" who is one of forty directors under a VP often is not. A role
+clearly below target level (shift supervisor, assistant manager, team lead,
+coordinator, single-crew roles) caps at 30 however well the industry fits.
+
+Then score on:
 - Does his actual operating experience map to what this job runs day to day?
 - Is the scope right — enough autonomy and P&L to be interesting, not so big it's
   a turnaround grind?
 - Employer shape: small/single-site/private/family-owned scores higher than a
   layer deep inside a large public company.
-- Compensation: if the posting states pay below his floor, cap the score at 25.
+- Compensation, using the two numbers in his profile. Below the FLOOR, cap at
+  25 — that is a walk-away. Inside the TARGET BAND, treat it as a positive. \
+Between floor and band, it is workable but say so in why_not. Judge only pay the
+  posting actually STATES; never infer a salary from the title or the employer.
+- Location: he is open to remote, and at this level remote and
+  hybrid-with-travel are normal. A remote role is not penalised for being remote.
 - If the posting has no description, score on title and employer only and cap at 55.
 
 why_not is the real risk or gap, not a hedge. resume_angle is the specific
@@ -90,13 +110,19 @@ export const SCHEMA = {
  * The stable prefix — byte-identical for every posting in a run, so it caches
  * and a 250-posting run pays for the resume once instead of 250 times.
  */
+const usd = (n: number) => `$${n.toLocaleString("en-US")}`;
+
 export function resumePrefix(r: Resume): string {
-  const floor = r.comp_floor ?? 0;
+  const band = r.comp_target_low && r.comp_target_high
+    ? `${usd(r.comp_target_low)} - ${usd(r.comp_target_high)}/yr`
+    : "not stated";
   return [
     "CANDIDATE RESUME",
     r.content,
     "",
-    `COMPENSATION FLOOR: $${floor.toLocaleString("en-US")}/yr`,
+    `TARGET LEVEL: ${r.target_level || "not stated"}`,
+    `TARGET COMPENSATION BAND: ${band}`,
+    `COMPENSATION FLOOR (walk-away): ${r.comp_floor ? usd(r.comp_floor) + "/yr" : "not stated"}`,
     `MUST HAVE: ${(r.must_have ?? []).join(", ") || "none stated"}`,
     `DEALBREAKERS: ${(r.dealbreakers ?? []).join(", ") || "none stated"}`,
   ].join("\n");

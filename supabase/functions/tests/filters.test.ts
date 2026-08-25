@@ -72,6 +72,32 @@ Deno.test("short include terms are bounded on both sides", () => {
   assertEquals(titleOk("VPN Support Engineer"), false);
 });
 
+Deno.test("target level: Sr Manager / Director and up survive", () => {
+  for (const t of ["Senior Manager, Logistics", "Sr Manager Distribution",
+                   "Director of Operations", "Head of Distribution - North America",
+                   "VP Operations", "Senior Director, Supply Chain",
+                   "Chief Operating Officer"]) {
+    assertEquals(titleOk(t), true, t);
+  }
+});
+
+Deno.test("unambiguously junior titles die free", () => {
+  for (const t of ["Assistant Manager", "Shift Supervisor", "Shift Manager",
+                   "Team Lead", "Crew Leader", "Management Trainee",
+                   "Associate Manager", "Assistant Director of Operations"]) {
+    assertEquals(titleOk(t), false, t);
+  }
+});
+
+Deno.test("but arguable titles are left for the model to judge on scope", () => {
+  // A keyword cannot tell an 80-person DC manager from a shift lead. These are
+  // the titles Keith has actually held, and they stay in.
+  for (const t of ["Operations Manager", "Distribution Manager", "Plant Manager",
+                   "Market Manager", "Warehouse Manager", "General Manager"]) {
+    assertEquals(titleOk(t), true, t);
+  }
+});
+
 Deno.test("area/regional/district manager survive — real alert-email titles", () => {
   // "Area Manager at B&T Building Services, Buffalo" came through a LinkedIn
   // alert and was dropped: a legitimate multi-site ops title that was in
