@@ -30,6 +30,7 @@ empty manifest that looks like "no matches today".
 | `supabase/migrations/0001_jobscout_schema.sql` | Tables, the `v_shortlist` view the dashboard reads, and the `runs` log |
 | `supabase/migrations/0002_jobscout_schedule.sql` | `pg_cron` + `pg_net` wiring. Separate migration because applying it is what turns the machine on |
 | `supabase/functions/_shared/` | Every decision lives here, with dependencies injected — this is what the tests exercise |
+| `tools/build_gazetteer.py` | Regenerates `_shared/gazetteer.ts` from USPS ZIP data. Run it to move the origin or widen the kept footprint |
 | `supabase/functions/jobscout-*/` | Wiring only. Supabase in, shared core out; nothing here decides anything |
 | `dashboard.html` | The shortlist. Runs locally, reads with the anon key |
 | `seed_companies.csv` | 59 WNY employers weighted toward the target profile |
@@ -44,7 +45,7 @@ Cores are pure and injected; the edge functions are thin enough to read.
 deno test supabase/functions/tests/
 ```
 
-51 tests, no network, about half a second. They cover the adapter field mapping
+63 tests, no network, about a second. They cover the adapter field mapping
 against recorded ATS payloads, the stage-1 filters, the SSRF guard, and — the
 ones worth having — the ingest failure paths, because the close-stale step is
 the one that can destroy data if it fires on bad input.
@@ -80,6 +81,29 @@ once the core is running:
 
 Option 2 is the one worth building next. It is simpler than the adapters and it
 covers the companies that matter most.
+
+## The radius
+
+`JOBSCOUT_SCORE_*` aside, the one number that decides what gets looked at is
+`DEFAULT_RADIUS_MILES` in `_shared/geo.ts` — 50, measured from Buffalo.
+
+A posting's location resolves in this order: remote, then ZIP code (exact),
+then a region phrase, then city + state. The gazetteer behind it is generated
+from USPS ZIP data by `tools/build_gazetteer.py` — 4,726 place names including
+USPS alternates, and 4,470 ZIP centroids. Regenerate it with:
+
+```
+pip install zipcodes && python tools/build_gazetteer.py
+```
+
+Two behaviours worth knowing before tuning it:
+
+- **An unrecognized location passes.** An unknown place is not a reason to
+  spend nothing; the model judges it with the posting in hand. That is also why
+  far-away places have to be IN the gazetteer — they must be present to be
+  excluded, not merely absent.
+- **Widening the radius is one number.** The data is not built around 50 miles;
+  it keeps everything within 150, so raising the radius needs no regeneration.
 
 ## Cost
 
