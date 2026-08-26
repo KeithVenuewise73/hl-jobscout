@@ -4,8 +4,10 @@ Searches employer career sites directly. No LinkedIn, no Indeed — each adapter
 talks to the applicant-tracking system the employer already runs.
 
 Everything runs on Supabase, on a schedule. **Nothing runs on Keith's machine.**
-There is no terminal step in normal operation; the only thing he opens is
-`dashboard.html`.
+There is no terminal step in normal operation; the only thing he opens is a
+bookmark — the shortlist is served by `jobscout-dashboard`, an edge function
+that renders the page server-side. Nothing is pasted, and no key reaches the
+browser.
 
 ---
 
@@ -18,7 +20,7 @@ There is no terminal step in normal operation; the only thing he opens is
 ```
 
 Each is a Supabase Edge Function, fired by `pg_cron` via `jobscout.kick()`
-(see `supabase/migrations/0002_jobscout_schedule.sql`). Every run writes what it
+(see `supabase/migrations/0006_jobscout_schedule.sql`). Every run writes what it
 actually did to `jobscout.runs`, and the dashboard reads that back — so the
 status strip says "never run" when nothing has run, rather than showing an
 empty manifest that looks like "no matches today".
@@ -28,11 +30,13 @@ empty manifest that looks like "no matches today".
 | | |
 |---|---|
 | `supabase/migrations/0001_jobscout_schema.sql` | Tables, the `v_shortlist` view the dashboard reads, and the `runs` log |
-| `supabase/migrations/0002_jobscout_schedule.sql` | `pg_cron` + `pg_net` wiring. Separate migration because applying it is what turns the machine on |
+| `supabase/migrations/0006_jobscout_schedule.sql` | `pg_cron` + `pg_net` wiring. Separate migration because applying it is what turns the machine on |
+| `supabase/migrations/0007_jobscout_view_token.sql` | The read token the dashboard link carries. Separate from the run token on purpose — reading the shortlist must not be able to start a run |
 | `supabase/functions/_shared/` | Every decision lives here, with dependencies injected — this is what the tests exercise |
 | `tools/build_gazetteer.py` | Regenerates `_shared/gazetteer.ts` from USPS ZIP data. Run it to move the origin or widen the kept footprint |
 | `supabase/functions/jobscout-*/` | Wiring only. Supabase in, shared core out; nothing here decides anything |
-| `dashboard.html` | The shortlist. Runs locally, reads with the anon key |
+| `supabase/functions/jobscout-dashboard/` | The shortlist, rendered server-side. The URL carries a read-only token; the browser never receives a credential |
+| `dashboard.html` | Dead. A pointer left where an old bookmark lands |
 | `seed_companies.csv` | 59 WNY employers weighted toward the target profile |
 
 The split is deliberate: the sandbox that builds this cannot reach jsr.io, npm,
@@ -45,7 +49,7 @@ Cores are pure and injected; the edge functions are thin enough to read.
 deno test supabase/functions/tests/
 ```
 
-63 tests, no network, about a second. They cover the adapter field mapping
+157 tests, no network, about a second. They cover the adapter field mapping
 against recorded ATS payloads, the stage-1 filters, the SSRF guard, and — the
 ones worth having — the ingest failure paths, because the close-stale step is
 the one that can destroy data if it fires on bad input.
@@ -66,14 +70,15 @@ breaks ingest and every test still passes.
 |---|---|
 | Greenhouse / Lever / Ashby / SmartRecruiters | JSON feeds, no scraping — parsing unit-tested, not yet run against a live board |
 | Workday | Its own internal endpoint; slower, may need per-tenant tuning — parsing unit-tested, not yet run live |
-| iCIMS, Paylocity, ADP, Paycom, UKG, Taleo | **Detected but not ingested** — each needs an adapter |
+| ADP | Live — field names read off a real employer response, not documentation |
+| iCIMS, Paylocity, Paycom, UKG, Taleo, SuccessFactors | **Detected but not ingested** — each needs an adapter |
 | Custom careers pages with no ATS | Not attempted |
 
 The unsupported tier is where most of the actual targets live. Two ways forward
 once the core is running:
 
 1. **Adapters.** Paylocity and JazzHR both have parseable JSON behind their job
-   list pages — each is maybe an hour. iCIMS and ADP are HTML scrapes.
+   list pages — each is maybe an hour. iCIMS is an HTML scrape; ADP is done.
 2. **Change-detection fallback.** For any careers page with no ATS at all, hash
    the page text daily and alert on change. Crude, but it catches a new posting
    at a 40-person family distributor the same day it goes up — which is exactly
