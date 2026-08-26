@@ -138,6 +138,14 @@ export function runSummary(r: RunRow): string {
         `${n("still_unresolved")} still without a job board`;
     case "describe":
       return `${n("updated")} of ${n("asked")} descriptions fetched`;
+    case "tailor":
+      return `resume tailored for job ${n("job_id")}, ${n("bullets_kept")} bullets kept` +
+        // The number worth surfacing is what was THROWN AWAY. A tailoring that
+        // quietly dropped four unverifiable claims is the check working, and
+        // he should see that it did.
+        (Array.isArray(rep.bullets_removed) && rep.bullets_removed.length
+          ? `, ${rep.bullets_removed.length} unverifiable and removed`
+          : "");
     default:
       return r.ok ? "completed" : "failed";
   }
