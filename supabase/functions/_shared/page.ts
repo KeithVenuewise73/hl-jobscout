@@ -19,14 +19,15 @@
 //     GET /storage/v1/object/sign/dash/...?tok  -> text/plain, nosniff, sandbox
 //
 // Three different code paths, one answer. Nothing served from *.supabase.co
-// renders as HTML, so the page needs a host that will — a custom domain on
-// this project, or somewhere else entirely. That decision is not made here.
+// renders as HTML, so the page needs a host that will — that is apps/viewer,
+// which runs on Keith's own server and forwards to this project.
 //
-// WHAT THIS ARRANGEMENT STILL BUYS
+// WHAT THIS ARRANGEMENT BUYS
 //
-// The page is a file, and the function redirects to it. That is the right
-// shape for any host that can render it: only pageUrl() changes. The bookmark
-// stays pointed at the function, so it survives the move.
+// The page is a file, and the function redirects to it. Supabase stays the
+// only thing that decides anything; the viewer is a content-type fixer holding
+// no credentials. The bookmark points at the viewer, so the page can move
+// again without the bookmark changing.
 //
 // The cost is honesty about time: a file is a snapshot. It is stamped with
 // when it was written, and the run ages on it correct themselves against the
@@ -77,15 +78,18 @@ export function pageUrl(supabaseUrl: string, token: string): string {
 }
 
 /**
- * Where the page's buttons POST.
+ * Where the page's buttons POST: nowhere in particular, which is the point.
  *
- * Same origin as the stored file while both live on supabase.co, which is why
- * there is no CORS handling anywhere. Moving the page to another host is what
- * would change that — the endpoint would need to send CORS headers back.
+ * An absolute Supabase URL was the obvious choice and the wrong one. The page
+ * is served from Keith's own domain by apps/viewer, so an absolute URL back to
+ * supabase.co makes every click a cross-origin request and CORS refuses it.
+ * Empty means "post to whatever URL served me" — the viewer, which forwards.
+ *
+ * Keeping it a named function rather than a bare "" so the reasoning has
+ * somewhere to live.
  */
-export function endpointUrl(supabaseUrl: string, token: string): string {
-  return `${supabaseUrl.replace(/\/$/, "")}` +
-    `/functions/v1/jobscout-dashboard?k=${encodeURIComponent(token)}`;
+export function endpointUrl(): string {
+  return "";
 }
 
 // ---- the wiring ------------------------------------------------------------
@@ -148,7 +152,7 @@ export async function publish(
 ): Promise<string> {
   const data = await collect(admin, {
     now,
-    endpoint: endpointUrl(supabaseUrl, token),
+    endpoint: endpointUrl(),
     published_at: now,
   });
   const html = renderPage(data);

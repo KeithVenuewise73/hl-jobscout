@@ -57,7 +57,8 @@ export interface PageData {
    * posted to its own URL. It is now a file in Storage, because Supabase
    * rewrites `text/html` to `text/plain` on the functions domain and the page
    * arrived in the browser as source code. A file cannot answer a POST, so the
-   * endpoint has to be named. Same origin either way, so no CORS.
+   * endpoint has to be named. Empty means "whatever served me", which is right
+   * when apps/viewer is serving the file and forwarding the POST back here.
    */
   endpoint?: string;
   /**
@@ -231,8 +232,8 @@ function jsLiteral(v: unknown): string {
 }
 
 const js = (endpoint: string) => `
-// Falls back to "post to whatever URL served me", which is right when a
-// function renders the page on request and wrong once it is a static file.
+// Falls back to "post to whatever URL served me", which is what apps/viewer
+// needs — an absolute URL back to supabase.co would be blocked by CORS.
 const POST_TO = ${jsLiteral(endpoint)} || (location.pathname + location.search);
 
 async function mark(id, status, btn){

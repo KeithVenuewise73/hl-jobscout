@@ -19,10 +19,10 @@ the markup as source. Measured on this project against the identical file:
 | `/storage/v1/object/sign/dash/...?token=` | `text/plain`, nosniff, sandbox |
 
 That is the platform declining to host HTML on a domain shared by every
-project, not a bug to work around. The page needs a host that renders HTML — a
-custom domain on this project, or somewhere else. Only `pageUrl()` in
-`_shared/page.ts` changes when that is decided; the bookmark points at the
-function, which redirects, so it survives the move.
+project, not a bug to work around. So the page is rendered and stored by
+Supabase and served to a browser by `apps/viewer`, which runs on Keith's own
+server. Supabase still decides everything; the viewer holds no credentials and
+only fixes the content type.
 
 ---
 
@@ -48,11 +48,13 @@ empty manifest that looks like "no matches today".
 | `supabase/migrations/0006_jobscout_schedule.sql` | `pg_cron` + `pg_net` wiring. Separate migration because applying it is what turns the machine on |
 | `supabase/migrations/0007_jobscout_view_token.sql` | The read token the dashboard link carries. Separate from the run token on purpose — reading the shortlist must not be able to start a run |
 | `supabase/migrations/0008_jobscout_dash_bucket.sql` | The bucket the page is written to. No RLS policy on purpose: the path contains the token, so listing must stay impossible |
+| `supabase/migrations/0009_jobscout_publish_schedule.sql` | Rewrites the page after each run. **Not applied yet** — without it the page only refreshes when a button is clicked |
 | `supabase/functions/_shared/` | Every decision lives here, with dependencies injected — this is what the tests exercise |
 | `tools/build_gazetteer.py` | Regenerates `_shared/gazetteer.ts` from USPS ZIP data. Run it to move the origin or widen the kept footprint |
 | `supabase/functions/jobscout-*/` | Wiring only. Supabase in, shared core out; nothing here decides anything |
 | `supabase/functions/jobscout-dashboard/` | Writes the page to Storage on cron, redirects a bookmark to it, and records Applied / Not interested. The URL carries a read-only token; the browser never receives a credential |
 | `dashboard.html` | Dead. A pointer left where an old bookmark lands |
+| `apps/viewer` | Serves the page on a domain that renders HTML. Two files, no secrets — see its README |
 | `seed_companies.csv` | 59 WNY employers weighted toward the target profile |
 
 The split is deliberate: the sandbox that builds this cannot reach jsr.io, npm,
@@ -65,7 +67,7 @@ Cores are pure and injected; the edge functions are thin enough to read.
 deno test supabase/functions/tests/
 ```
 
-157 tests, no network, about a second. They cover the adapter field mapping
+165 tests, no network, about a second. They cover the adapter field mapping
 against recorded ATS payloads, the stage-1 filters, the SSRF guard, and — the
 ones worth having — the ingest failure paths, because the close-stale step is
 the one that can destroy data if it fires on bad input.

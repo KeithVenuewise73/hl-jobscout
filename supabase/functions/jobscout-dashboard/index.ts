@@ -7,9 +7,10 @@
 //
 // Supabase rewrites a text/html response to text/plain, with nosniff and a
 // sandbox CSP, on the shared functions domain — so the first version of this
-// arrived in the browser as source code. Storage has no such rule: an object
-// is served with the content type it was stored with. So the page is written
-// to Storage and this endpoint does the three things a file cannot:
+// arrived in the browser as source code. Storage does the same, on both public
+// and signed URLs. The page is therefore written to Storage and served to a
+// browser by apps/viewer, on a domain that renders HTML; this endpoint does
+// the three things a file cannot:
 //
 //   POST + x-jobscout-token   rewrite the stored page. This is cron.
 //   GET  + ?k=<view_token>    redirect to it, so the original bookmark lives.
