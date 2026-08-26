@@ -50,6 +50,22 @@ export interface PageData {
   coverage: Coverage;
   /** ISO. Injected so the page is deterministic in tests. */
   now: string;
+  /**
+   * Where the Applied / Not interested buttons POST.
+   *
+   * The page used to assume it was being served BY the thing it posts to, and
+   * posted to its own URL. It is now a file in Storage, because Supabase
+   * rewrites `text/html` to `text/plain` on the functions domain and the page
+   * arrived in the browser as source code. A file cannot answer a POST, so the
+   * endpoint has to be named. Same origin either way, so no CORS.
+   */
+  endpoint?: string;
+  /**
+   * ISO, set when the page is a snapshot written to Storage rather than
+   * rendered on request. A frozen page must say when it froze — otherwise it
+   * is a screenshot pretending to be a dashboard.
+   */
+  published_at?: string;
 }
 
 // ---- escaping --------------------------------------------------------------
@@ -203,13 +219,28 @@ border-radius:999px;padding:2px 9px}
 .note{font-size:13.5px;color:var(--soft);margin:4px 0 0}
 `;
 
-const JS = `
+/**
+ * Embed a server-side string as a JavaScript literal.
+ *
+ * JSON.stringify alone is not enough inside a <script>: the HTML parser ends
+ * the block at the first literal "</script", wherever it appears, including
+ * inside a quoted string. Escaping "<" removes the only way to write it.
+ */
+function jsLiteral(v: unknown): string {
+  return JSON.stringify(v ?? "").replace(/</g, "\\u003c");
+}
+
+const js = (endpoint: string) => `
+// Falls back to "post to whatever URL served me", which is right when a
+// function renders the page on request and wrong once it is a static file.
+const POST_TO = ${jsLiteral(endpoint)} || (location.pathname + location.search);
+
 async function mark(id, status, btn){
   const card = btn.closest('.job');
   const was = btn.textContent;
   btn.textContent = '...'; btn.disabled = true;
   try{
-    const r = await fetch(location.pathname + location.search, {
+    const r = await fetch(POST_TO, {
       method:'POST', headers:{'content-type':'application/json'},
       body: JSON.stringify({job_ids: JSON.parse(card.dataset.ids), status: status})
     });
@@ -221,6 +252,21 @@ async function mark(id, status, btn){
     btn.textContent = was; btn.disabled = false;
     alert('Could not save that: ' + e.message);
   }
+}
+
+// The page is a snapshot written to Storage, so "4 hours ago" was true when it
+// was written and drifts from then on. Re-age it against the real clock, and
+// re-apply the stale warning, so an old snapshot admits to being old rather
+// than presenting yesterday's run as if it just happened.
+for (const el of document.querySelectorAll('[data-at]')) {
+  const then = new Date(el.dataset.at).getTime();
+  if (!Number.isFinite(then)) continue;
+  const m = Math.floor((Date.now() - then) / 60000);
+  el.textContent = m < 1 ? 'just now'
+    : m < 60 ? m + ' min ago'
+    : m < 2880 ? Math.round(m/60) + ' hour' + (Math.round(m/60) === 1 ? '' : 's') + ' ago'
+    : Math.round(m/1440) + ' days ago';
+  el.classList.toggle('warn', m > 36 * 60);
 }
 `;
 
@@ -286,7 +332,9 @@ export function renderPage(d: PageData): string {
       `<div class="run"><b>${esc(r.kind)}</b>
        <span class="${r.ok ? "ok" : "bad"}">${r.ok ? "ok" : "failed"}</span>
        <span>${esc(runSummary(r))}</span>
-       <span class="when ${stale(r) ? "warn" : ""}">${esc(ago(r.ran_at, d.now))}</span></div>`
+       <span class="when ${
+        stale(r) ? "warn" : ""
+      }" data-at="${esc(r.ran_at)}">${esc(ago(r.ran_at, d.now))}</span></div>`
     ).join("")
     : `<p class="empty">Nothing has run yet. That is not a display problem —
        no crawl or scoring run has been recorded.</p>`;
@@ -304,6 +352,15 @@ export function renderPage(d: PageData): string {
 <div class="panel">
   <h2>The machine</h2>
   ${statusRows}
+  ${
+    d.published_at
+      ? `<p class="note">This page is a snapshot, written
+         <span data-at="${esc(d.published_at)}">${
+        esc(ago(d.published_at, d.now))
+      }</span>. It rewrites itself after every run and after anything you mark
+         here, so a reload is always the current picture.</p>`
+      : ""
+  }
 </div>
 
 ${
@@ -330,5 +387,5 @@ ${handled ? `<div class="panel"><h2>Handled</h2>${
   }. Alert emails are loaded by hand, not automatically.</p>
 </div>
 
-</div><script>${JS}</script></body></html>`;
+</div><script>${js(d.endpoint ?? "")}</script></body></html>`;
 }

@@ -1,43 +1,62 @@
-// jobscout-dashboard — the page Keith opens.
+// jobscout-dashboard — the endpoint behind the page.
 //
 // WIRING ONLY; every decision about what the page says lives in
-// ../_shared/dashboard.ts and is tested offline.
+// ../_shared/dashboard.ts and ../_shared/page.ts, and is tested offline.
 //
-// TWO DELIBERATE DEPARTURES FROM THE OTHER FUNCTIONS, both because a browser
-// is opening this rather than pg_cron:
+// THIS FUNCTION DOES NOT SERVE THE PAGE, AND CANNOT.
 //
-//   * verify_jwt is OFF. A browser cannot attach an Authorization header when
-//     you click a bookmark, so a JWT-gated page is a page nobody can open.
-//     Access is the token in the URL instead.
-//   * That token is view_token, NOT the cron token. A bookmark ends up in
-//     history, in a synced browser profile, in a screenshot. Whoever holds this
-//     one can read the shortlist and mark a job applied; they cannot start a
-//     crawl or a scoring run, because that needs the other token, which never
-//     leaves the database.
+// Supabase rewrites a text/html response to text/plain, with nosniff and a
+// sandbox CSP, on the shared functions domain — so the first version of this
+// arrived in the browser as source code. Storage has no such rule: an object
+// is served with the content type it was stored with. So the page is written
+// to Storage and this endpoint does the three things a file cannot:
 //
-// The browser receives rendered HTML and no credential of any kind. Everything
-// is read here, server-side, over the service-role connection.
+//   POST + x-jobscout-token   rewrite the stored page. This is cron.
+//   GET  + ?k=<view_token>    redirect to it, so the original bookmark lives.
+//   POST + ?k=<view_token>    mark a job applied / not interested, then
+//                             rewrite the page so a reload shows the decision.
+//
+// TWO TOKENS, AND THE DIFFERENCE MATTERS. view_token travels in a URL, which
+// means it ends up in browser history, in a synced profile, in a screenshot.
+// Whoever holds it can read the shortlist and mark a job. It cannot start a
+// crawl or a scoring run — those cost money and need cron_token, which never
+// leaves the database.
+//
+// verify_jwt is OFF because a browser cannot attach an Authorization header
+// when you click a bookmark. The tokens above are the access control.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import {
-  renderPage, type Coverage, type RunRow, type ShortlistRow,
-} from "../_shared/dashboard.ts";
-import { tokenMatches } from "../_shared/auth.ts";
+import { CRON_HEADER, tokenMatches } from "../_shared/auth.ts";
+import { pageUrl, publish } from "../_shared/page.ts";
 
 Deno.serve(async (req) => {
-  const admin = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    { db: { schema: "jobscout" } },
-  );
+  const url = Deno.env.get("SUPABASE_URL")!;
+  const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+    db: { schema: "jobscout" },
+  });
+
+  const { data: rt, error: rtErr } = await admin
+    .from("runtime").select("view_token,cron_token").limit(1);
+  if (rtErr) return text(`configuration unreadable: ${rtErr.message}`, 500);
+  const cfg = (rt as { view_token?: string; cron_token?: string }[] | null)?.[0];
+  const view = cfg?.view_token ?? null;
+  if (!view) return text("No view token is configured yet.", 503);
+
+  const now = () => new Date().toISOString();
+
+  // ---- cron: rewrite the stored page ----
+  if (tokenMatches(req.headers.get(CRON_HEADER), cfg?.cron_token ?? null)) {
+    try {
+      // Logged, not returned: the caller is cron, and cron reads nothing.
+      console.log("published", await publish(admin, url, view, now()));
+      return json({ ok: true });
+    } catch (e) {
+      return json({ ok: false, error: (e as Error).message }, 500);
+    }
+  }
 
   const given = new URL(req.url).searchParams.get("k");
-  const { data: rt, error: rtErr } = await admin
-    .from("runtime").select("view_token").limit(1);
-  if (rtErr) return text(`configuration unreadable: ${rtErr.message}`, 500);
-  const expected = (rt as { view_token?: string }[] | null)?.[0]?.view_token ?? null;
-  if (!expected) return text("No view token is configured yet.", 503);
-  if (!tokenMatches(given, expected)) return text("Not found.", 404);
+  if (!tokenMatches(given, view)) return text("Not found.", 404);
 
   // ---- marking a job applied / not interested ----
   if (req.method === "POST") {
@@ -58,58 +77,35 @@ Deno.serve(async (req) => {
     // marking one applied while its twin still reads "new" is the duplicate
     // problem wearing a different hat.
     const { error } = await admin.from("applications").upsert(
-      ids.map((job_id) => ({ job_id, status, updated_at: new Date().toISOString() })),
+      ids.map((job_id) => ({ job_id, status, updated_at: now() })),
       { onConflict: "job_id" },
     );
     if (error) return json({ ok: false, error: error.message }, 500);
+
+    // The page is a file. Without this the click is saved and the file still
+    // reads "new" until the next scheduled run, which looks exactly like a
+    // button that did nothing.
+    try {
+      await publish(admin, url, view, now());
+    } catch (e) {
+      // The decision IS saved. Say that, and say what did not happen, rather
+      // than reporting a failure that would have him click it again.
+      return json({
+        ok: true,
+        updated: ids.length,
+        warning: `saved, but the page could not be rewritten: ${(e as Error).message}`,
+      });
+    }
     return json({ ok: true, updated: ids.length });
   }
 
   // ---- the page ----
-  const [shortlist, jobs, runs, companies] = await Promise.all([
-    admin.from("v_shortlist").select("*").order("fit_score", { ascending: false }).limit(300),
-    // v_shortlist carries no company_id, and grouping needs one — two rows are
-    // the same job only if they are at the same EMPLOYER.
-    admin.from("jobs").select("id,company_id"),
-    admin.from("v_last_runs").select("*"),
-    admin.from("companies").select("id,ats,active"),
-  ]);
-
-  const firstError = [shortlist, jobs, runs, companies].find((r) => r.error)?.error;
-  if (firstError) return text(`could not read the shortlist: ${firstError.message}`, 500);
-
-  const companyOf = new Map(
-    ((jobs.data ?? []) as { id: number; company_id: number }[])
-      .map((j) => [j.id, j.company_id]),
-  );
-  const rows = ((shortlist.data ?? []) as Record<string, unknown>[]).map((r) => ({
-    ...r,
-    company_id: companyOf.get(r.job_id as number) ?? -1,
-  })) as ShortlistRow[];
-
-  const cos = (companies.data ?? []) as { ats: string | null; active: boolean }[];
-  const CRAWLABLE = ["greenhouse", "lever", "ashby", "smartrecruiters", "workday", "adp"];
-  const active = cos.filter((c) => c.active);
-  const coverage: Coverage = {
-    employers_total: active.length,
-    employers_crawlable: active.filter((c) => CRAWLABLE.includes(c.ats ?? "")).length,
-    employers_no_ats: active.filter((c) => !c.ats || c.ats === "unknown").length,
-    open_jobs: rows.length,
-    sources: [...new Set(rows.map((r) => r.source ?? "?"))].sort(),
-  };
-
-  const html = renderPage({
-    rows,
-    runs: (runs.data ?? []) as RunRow[],
-    coverage,
-    now: new Date().toISOString(),
-  });
-
-  return new Response(html, {
+  // 303 so the browser follows with GET, uncached so this keeps working if the
+  // page ever moves again.
+  return new Response(null, {
+    status: 303,
     headers: {
-      "content-type": "text/html; charset=utf-8",
-      // The page holds a live token in its URL; keep it out of caches and out
-      // of the Referer header on the outbound "Open posting" clicks.
+      location: pageUrl(url, view),
       "cache-control": "no-store",
       "referrer-policy": "no-referrer",
     },

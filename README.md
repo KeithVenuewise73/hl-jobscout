@@ -5,9 +5,24 @@ talks to the applicant-tracking system the employer already runs.
 
 Everything runs on Supabase, on a schedule. **Nothing runs on Keith's machine.**
 There is no terminal step in normal operation; the only thing he opens is a
-bookmark — the shortlist is served by `jobscout-dashboard`, an edge function
-that renders the page server-side. Nothing is pasted, and no key reaches the
-browser.
+bookmark.
+
+**The page does not render yet, and the reason is not in this code.** Anything
+served from `*.supabase.co` comes back rewritten to `text/plain` with `nosniff`
+and `content-security-policy: default-src 'none'; sandbox`, so a browser shows
+the markup as source. Measured on this project against the identical file:
+
+| Path | Response |
+|---|---|
+| `/functions/v1/jobscout-dashboard` | `text/plain`, nosniff, sandbox |
+| `/storage/v1/object/public/dash/...` | `text/plain`, nosniff, sandbox |
+| `/storage/v1/object/sign/dash/...?token=` | `text/plain`, nosniff, sandbox |
+
+That is the platform declining to host HTML on a domain shared by every
+project, not a bug to work around. The page needs a host that renders HTML — a
+custom domain on this project, or somewhere else. Only `pageUrl()` in
+`_shared/page.ts` changes when that is decided; the bookmark points at the
+function, which redirects, so it survives the move.
 
 ---
 
@@ -32,10 +47,11 @@ empty manifest that looks like "no matches today".
 | `supabase/migrations/0001_jobscout_schema.sql` | Tables, the `v_shortlist` view the dashboard reads, and the `runs` log |
 | `supabase/migrations/0006_jobscout_schedule.sql` | `pg_cron` + `pg_net` wiring. Separate migration because applying it is what turns the machine on |
 | `supabase/migrations/0007_jobscout_view_token.sql` | The read token the dashboard link carries. Separate from the run token on purpose — reading the shortlist must not be able to start a run |
+| `supabase/migrations/0008_jobscout_dash_bucket.sql` | The bucket the page is written to. No RLS policy on purpose: the path contains the token, so listing must stay impossible |
 | `supabase/functions/_shared/` | Every decision lives here, with dependencies injected — this is what the tests exercise |
 | `tools/build_gazetteer.py` | Regenerates `_shared/gazetteer.ts` from USPS ZIP data. Run it to move the origin or widen the kept footprint |
 | `supabase/functions/jobscout-*/` | Wiring only. Supabase in, shared core out; nothing here decides anything |
-| `supabase/functions/jobscout-dashboard/` | The shortlist, rendered server-side. The URL carries a read-only token; the browser never receives a credential |
+| `supabase/functions/jobscout-dashboard/` | Writes the page to Storage on cron, redirects a bookmark to it, and records Applied / Not interested. The URL carries a read-only token; the browser never receives a credential |
 | `dashboard.html` | Dead. A pointer left where an old bookmark lands |
 | `seed_companies.csv` | 59 WNY employers weighted toward the target profile |
 
