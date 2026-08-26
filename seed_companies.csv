@@ -57,3 +57,15 @@ Cummins,cummins.com,Jamestown,NY,large,public,3,Engine plant
 Great Lakes Cheese,greatlakescheese.com,Adams,NY,large,family,2,Family owned; plant ops
 Ellicott Development,ellicottdevelopment.com,Buffalo,NY,mid,family,2,Property ops
 Buffalo Niagara Medical Campus,bnmc.org,Buffalo,NY,small,nonprofit,3,Campus operations
+Tesla,tesla.com,Buffalo,NY,large,public,1,"Gigafactory New York. Careers API returns 403 to server-side requests — route in via a job alert, not the crawler"
+Ingram Micro,ingrammicro.com,Amherst,NY,large,public,2,Distribution at scale; Workday board resolved
+Alkegen,alkegen.com,Tonawanda,NY,mid,pe,1,"Formerly Unifrax; specialty materials. Root domain behind a Cloudflare challenge"
+Linde,linde.com,Tonawanda,NY,large,public,2,Formerly Praxair; large Tonawanda industrial-gas presence
+3M,3m.com,Tonawanda,NY,large,public,2,Tonawanda plant
+Sumitomo Rubber North America,,Tonawanda,NY,mid,public,2,"Tonawanda tire plant. Website left BLANK on purpose — the North American domain was not confirmed, and a guessed one would crawl the wrong company"
+Highmark BCBS,bcbswny.com,Buffalo,NY,large,nonprofit,3,"Weaker ops fit. Note bcbswny.com, not highmarkbcbswny.com — the latter does not resolve"
+Roswell Park,roswellpark.org,Buffalo,NY,large,nonprofit,3,Weaker ops fit; Workday board resolved
+M&T Bank,mtb.com,Buffalo,NY,large,public,3,Weaker ops fit; Workday board resolved
+ACV Auctions,acvauctions.com,Buffalo,NY,mid,public,2,Vehicle marketplace with real logistics operations
+Calspan,calspan.com,Buffalo,NY,mid,private,2,Testing and research; single-site private. iCIMS — detected but no adapter yet
+Northrop Grumman,northropgrumman.com,Amherst,NY,large,public,3,Amherst site

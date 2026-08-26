@@ -57,7 +57,7 @@ empty manifest that looks like "no matches today".
 | `supabase/functions/_shared/tailor.ts` | Rewrites the resume for one posting and drafts the letter — and proves nothing was invented. See below |
 | `dashboard.html` | Dead. A pointer left where an old bookmark lands |
 | `apps/viewer` | Serves the page on a domain that renders HTML. Two files, no secrets — see its README |
-| `seed_companies.csv` | 59 WNY employers weighted toward the target profile |
+| `seed_companies.csv` | 71 WNY employers weighted toward the target profile |
 
 The split is deliberate: the sandbox that builds this cannot reach jsr.io, npm,
 or any employer site, so anything that matters has to be provable without them.
