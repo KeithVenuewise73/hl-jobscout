@@ -49,10 +49,12 @@ empty manifest that looks like "no matches today".
 | `supabase/migrations/0007_jobscout_view_token.sql` | The read token the dashboard link carries. Separate from the run token on purpose — reading the shortlist must not be able to start a run |
 | `supabase/migrations/0008_jobscout_dash_bucket.sql` | The bucket the page is written to. No RLS policy on purpose: the path contains the token, so listing must stay impossible |
 | `supabase/migrations/0009_jobscout_publish_schedule.sql` | Rewrites the page after each run. **Not applied yet** — without it the page only refreshes when a button is clicked |
+| `supabase/migrations/0010_jobscout_tailorings.sql` | Tailored resumes and letters, with the verification result stored alongside |
 | `supabase/functions/_shared/` | Every decision lives here, with dependencies injected — this is what the tests exercise |
 | `tools/build_gazetteer.py` | Regenerates `_shared/gazetteer.ts` from USPS ZIP data. Run it to move the origin or widen the kept footprint |
 | `supabase/functions/jobscout-*/` | Wiring only. Supabase in, shared core out; nothing here decides anything |
 | `supabase/functions/jobscout-dashboard/` | Writes the page to Storage on cron, redirects a bookmark to it, and records Applied / Not interested. The URL carries a read-only token; the browser never receives a credential |
+| `supabase/functions/_shared/tailor.ts` | Rewrites the resume for one posting and drafts the letter — and proves nothing was invented. See below |
 | `dashboard.html` | Dead. A pointer left where an old bookmark lands |
 | `apps/viewer` | Serves the page on a domain that renders HTML. Two files, no secrets — see its README |
 | `seed_companies.csv` | 59 WNY employers weighted toward the target profile |
@@ -67,7 +69,7 @@ Cores are pure and injected; the edge functions are thin enough to read.
 deno test supabase/functions/tests/
 ```
 
-165 tests, no network, about a second. They cover the adapter field mapping
+193 tests, no network, about a second. They cover the adapter field mapping
 against recorded ATS payloads, the stage-1 filters, the SSRF guard, and — the
 ones worth having — the ingest failure paths, because the close-stale step is
 the one that can destroy data if it fires on bad input.
@@ -104,6 +106,40 @@ once the core is running:
 
 Option 2 is the one worth building next. It is simpler than the adapters and it
 covers the companies that matter most.
+
+## Tailoring, and why it does not lie
+
+`jobscout-tailor` rewrites the resume for one posting and drafts the letter. It
+runs on demand, one job at a time — tailoring everything would be paying to
+write applications nobody was going to send.
+
+The generation is the easy half. The contract is that the model may **reorder,
+reword and omit, and may never add**, and that is enforced rather than
+requested:
+
+- every bullet must list the resume lines it draws on, quoted verbatim;
+- every number in a bullet must appear in one of the lines that bullet cites;
+- a bullet that fails is removed and reported;
+- a failing headline or letter cannot be cut without leaving a hole, so it
+  drives one retry that names the specific invented figure. One, not a loop.
+
+Three holes were found by testing rather than by reasoning, and each is written
+into the code where it happened:
+
+| Hole | What got through |
+|---|---|
+| The unit is part of the claim | `$12M` canonicalised to `12`, verified clean against "a team of 12" |
+| The subject is part of the claim | A percentage checked against the whole resume matched a headcount's digits |
+| A word boundary after an optional group | `%` is not a word character, so every percentage was compared as a bare count |
+
+And one over-correction, also from a live run: binding a bullet to a *single*
+cited line deleted a true bullet that combined two of them. `sources` is a list
+for that reason — combine freely, cite everything.
+
+`verified` on a stored tailoring is false whenever anything in the finished
+document could not be traced back. The report keeps what the first attempt
+tried to claim, because a guard that fires and then withholds what it caught is
+half a guard.
 
 ## The radius
 
