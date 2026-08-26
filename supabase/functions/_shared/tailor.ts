@@ -26,8 +26,19 @@ export const MODEL = "claude-opus-5";
 export interface TailoredBullet {
   /** The rewritten line. */
   text: string;
-  /** The line from the resume it was derived from, quoted verbatim. */
-  source: string;
+  /**
+   * Every resume line this bullet draws on, quoted verbatim.
+   *
+   * A LIST, not one line, and the first live run is why. The model wrote
+   * "supervised approximately 30 warehouse associates in an 80,000-square-foot
+   * refrigerated distribution center" — both facts true, both in the resume,
+   * on two different lines. Checking against a single cited line rejected it,
+   * which is a guard deleting the truth. Checking against the whole resume
+   * would let a figure from anywhere attach to any subject, which is the hole
+   * this replaced. Citing both lines is the honest middle: combine freely, and
+   * show your work.
+   */
+  sources: string[];
   /** Which employer or section of the resume it belongs under. */
   section: string;
 }
@@ -76,20 +87,23 @@ employer — so be direct about the gaps.
 
 HOW TO WRITE THE BULLETS
 
-For every bullet you produce, quote in 'source' the line from the resume it came
-from, EXACTLY as it appears there — same words, same numbers, copied not
-paraphrased. This is checked automatically. A bullet whose source cannot be
-found in the resume is discarded, so an approximate quote costs you the bullet.
+For every bullet you produce, list in 'sources' every line of the resume it
+draws on, EXACTLY as each appears there — same words, same numbers, copied not
+paraphrased. This is checked automatically. A bullet with a source that cannot
+be found in the resume is discarded, so an approximate quote costs you the
+bullet.
+
+You may combine facts from several resume lines into one bullet. When you do,
+cite all of them.
 
 Rewriting means changing emphasis and language, not facts. If the resume says
 "managed a team of 12" you may write "led a 12-person team" — you may not write
 "led a team of 15" or "led a large team" if that overstates it.
 
-Every number in a bullet must appear in the line you cite as its source. The
-check is against THAT LINE, not the resume as a whole, because a figure lifted
-from one line and attached to the subject of another is a false claim built
-from true parts. If you want to combine facts from two lines, write two
-bullets.
+Every number in a bullet must appear in one of the lines you cite. The check is
+against YOUR CITED LINES, not the resume as a whole, because a figure lifted
+from somewhere you did not cite and attached to a different subject is a false
+claim built from true parts. Cite the line the number came from and it passes.
 
 Choose the 8 to 14 bullets that matter most for THIS posting, ordered with the
 most relevant first. A shorter resume that lands is better than a complete one
@@ -125,17 +139,18 @@ export const SCHEMA = {
         type: "object",
         properties: {
           text: { type: "string", description: "The rewritten bullet." },
-          source: {
-            type: "string",
+          sources: {
+            type: "array",
             description:
-              "The line from the resume this came from, copied verbatim.",
+              "Every resume line this bullet draws on, each copied verbatim.",
+            items: { type: "string" },
           },
           section: {
             type: "string",
             description: "The employer or resume section this belongs under.",
           },
         },
-        required: ["text", "source", "section"],
+        required: ["text", "sources", "section"],
         additionalProperties: false,
       },
     },
@@ -308,14 +323,24 @@ export function verifyGrounded(resumeText: string, t: Tailored): Finding[] {
       .map((forms) => forms[0]);
 
   t.bullets.forEach((b, i) => {
-    if (!haystack.includes(norm(b.source))) {
+    const cited = b.sources ?? [];
+    if (!cited.length) {
       findings.push({
         kind: "source_not_in_resume",
         where: i,
-        detail: `quoted source is not in the resume: "${b.source.slice(0, 90)}"`,
+        detail: "the bullet cites no resume line at all",
       });
     }
-    // A NUMBER IN A BULLET IS CHECKED AGAINST THAT BULLET'S OWN SOURCE LINE,
+    for (const src of cited) {
+      if (!haystack.includes(norm(src))) {
+        findings.push({
+          kind: "source_not_in_resume",
+          where: i,
+          detail: `quoted source is not in the resume: "${src.slice(0, 90)}"`,
+        });
+      }
+    }
+    // A NUMBER IN A BULLET IS CHECKED AGAINST THE LINES THAT BULLET CITES,
     // not against the whole resume.
     //
     // Checking the whole resume binds a figure to nothing but its digits. This
@@ -325,14 +350,13 @@ export function verifyGrounded(resumeText: string, t: Tailored): Finding[] {
     // right numbers, invented subjects. The bullet already has to name the
     // line it came from, so that line is the honest place to check it.
     //
-    // Bullets that legitimately draw a number from a different part of the
-    // resume are the cost, and it is the right cost: an over-strict check
-    // deletes a true bullet, an under-strict one ships a false claim.
-    for (const n of unsupportedIn(b.text, b.source)) {
+    // A bullet that legitimately draws on several lines just cites them all,
+    // so honest combination costs nothing and an uncited figure still fails.
+    for (const n of unsupportedIn(b.text, cited.join("\n"))) {
       findings.push({
         kind: "unsupported_number",
         where: i,
-        detail: `"${n}" is not in the resume line this bullet cites`,
+        detail: `"${n}" is not in any resume line this bullet cites`,
       });
     }
   });
@@ -501,7 +525,8 @@ export function correctionFor(c: Checked): string {
   for (const f of c.document) lines.push(`- ${f.detail}`);
   lines.push(
     "",
-    "Remember: 'source' must be copied from the resume character for character.",
+    "Remember: every entry in 'sources' must be copied from the resume " +
+      "character for character, and a number must appear in one of them.",
   );
   return lines.join("\n");
 }

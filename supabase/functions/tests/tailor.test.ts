@@ -37,7 +37,7 @@ const good = (over: Partial<Tailored> = {}): Tailored => ({
   headline: "Operations leader who has run multi-site distribution.",
   bullets: [{
     text: "Led a 12-person team across two distribution sites.",
-    source: "Managed a team of 12 across two distribution sites.",
+    sources: ["Managed a team of 12 across two distribution sites."],
     section: "FIVE STAR OPERATIONS",
   }],
   skills: ["WMS", "carrier negotiation"],
@@ -54,7 +54,7 @@ Deno.test("an invented percentage is caught", () => {
   const f = verifyGrounded(RESUME_TEXT, good({
     bullets: [{
       text: "Reduced fulfilment cost per order by 31%.",
-      source: "Reduced fulfilment cost per order by 18% over two years.",
+      sources: ["Reduced fulfilment cost per order by 18% over two years."],
       section: "FIVE STAR OPERATIONS",
     }],
   }));
@@ -69,7 +69,7 @@ Deno.test("an inflated headcount is caught even with an honest source quote", ()
   const f = verifyGrounded(RESUME_TEXT, good({
     bullets: [{
       text: "Led a 30-person team across two distribution sites.",
-      source: "Managed a team of 12 across two distribution sites.",
+      sources: ["Managed a team of 12 across two distribution sites."],
       section: "FIVE STAR OPERATIONS",
     }],
   }));
@@ -83,7 +83,7 @@ Deno.test("a paraphrased source quote is caught", () => {
   const f = verifyGrounded(RESUME_TEXT, good({
     bullets: [{
       text: "Led a 12-person team.",
-      source: "Managed a team of twelve people at two sites.",
+      sources: ["Managed a team of twelve people at two sites."],
       section: "FIVE STAR OPERATIONS",
     }],
   }));
@@ -100,7 +100,7 @@ Deno.test("a real number attached to an invented subject is caught", () => {
   const f = verifyGrounded(RESUME_TEXT, good({
     bullets: [{
       text: "Cut fulfilment cost per order by 12%.",
-      source: "Reduced fulfilment cost per order by 18% over two years.",
+      sources: ["Reduced fulfilment cost per order by 18% over two years."],
       section: "FIVE STAR OPERATIONS",
     }],
   }));
@@ -109,11 +109,48 @@ Deno.test("a real number attached to an invented subject is caught", () => {
   assertStringIncludes(f[0].detail, "cites");
 });
 
-Deno.test("a number from the line the bullet cites is accepted", () => {
+Deno.test("a bullet may combine two resume lines if it cites both", () => {
+  // The false positive the first live run produced: two true facts from two
+  // lines. Rejecting this deletes the truth; accepting it uncited would let a
+  // figure attach to any subject. Citing both is what makes it safe.
+  const f = verifyGrounded(RESUME_TEXT, good({
+    bullets: [{
+      text: "Led a 12-person team while owning a $4.2M operating budget.",
+      sources: [
+        "Managed a team of 12 across two distribution sites.",
+        "Owned a $4.2M operating budget.",
+      ],
+      section: "FIVE STAR OPERATIONS",
+    }],
+  }));
+  assertEquals(f, []);
+});
+
+Deno.test("combining two lines without citing both still fails", () => {
+  const f = verifyGrounded(RESUME_TEXT, good({
+    bullets: [{
+      text: "Led a 12-person team while owning a $4.2M operating budget.",
+      sources: ["Managed a team of 12 across two distribution sites."],
+      section: "FIVE STAR OPERATIONS",
+    }],
+  }));
+  assertEquals(f.length, 1);
+  assertStringIncludes(f[0].detail, "4200000");
+});
+
+Deno.test("a bullet citing nothing at all is rejected", () => {
+  const f = verifyGrounded(RESUME_TEXT, good({
+    bullets: [{ text: "Led operations.", sources: [], section: "X" }],
+  }));
+  assertEquals(f.length, 1);
+  assertEquals(f[0].kind, "source_not_in_resume");
+});
+
+Deno.test("a number from a line the bullet cites is accepted", () => {
   const f = verifyGrounded(RESUME_TEXT, good({
     bullets: [{
       text: "Owned a $4.2M operating budget.",
-      source: "Owned a $4.2M operating budget.",
+      sources: ["Owned a $4.2M operating budget."],
       section: "FIVE STAR OPERATIONS",
     }],
   }));
@@ -146,7 +183,7 @@ Deno.test("rewording a number into words is not a fabrication", () => {
   const f = verifyGrounded(RESUME_TEXT, good({
     bullets: [{
       text: "Led a team of twelve across two distribution sites.",
-      source: "Managed a team of 12 across two distribution sites.",
+      sources: ["Managed a team of 12 across two distribution sites."],
       section: "FIVE STAR OPERATIONS",
     }],
   }));
@@ -198,7 +235,7 @@ Deno.test("case and punctuation do not break a verbatim quote", () => {
   const f = verifyGrounded(RESUME_TEXT, good({
     bullets: [{
       text: "Rolled out a WMS across both sites.",
-      source: "implemented a wms rollout across both sites",
+      sources: ["implemented a wms rollout across both sites"],
       section: "FIVE STAR OPERATIONS",
     }],
   }));
@@ -213,7 +250,7 @@ Deno.test("a failed bullet is removed and reported, never silently kept", () => 
       good().bullets[0],
       {
         text: "Cut costs by 62%.",
-        source: "Reduced fulfilment cost per order by 18% over two years.",
+        sources: ["Reduced fulfilment cost per order by 18% over two years."],
         section: "FIVE STAR OPERATIONS",
       },
     ],
@@ -242,7 +279,7 @@ Deno.test("the correction names the specific invented figure", () => {
   const c = sanitize(RESUME_TEXT, good({
     bullets: [{
       text: "Cut costs by 62%.",
-      source: "Reduced fulfilment cost per order by 18% over two years.",
+      sources: ["Reduced fulfilment cost per order by 18% over two years."],
       section: "X",
     }],
   }));
